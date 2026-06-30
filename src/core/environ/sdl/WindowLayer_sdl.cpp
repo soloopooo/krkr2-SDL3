@@ -5,6 +5,10 @@
 #include <thread>
 #include <string>
 #include <cstdint>
+#include <cmath>
+#include <algorithm>
+
+#include "../android/JNIHelper_sdl.h"
 
 bool g_fullscreenStretch = false;
 #include <vector>
@@ -59,7 +63,7 @@ void TVPForceSwapBuffer() {} // No-op: display updates per-frame
 //------------------------------------------------------------------------------
 static tjs_uint8 s_Scancode[0x200];
 static tjs_uint16 s_Keymap[0x200];
-static int s_ScreenWidth = 0, s_ScreenHeight = 0;
+int s_ScreenWidth = 0, s_ScreenHeight = 0;
 
 TVPWindowLayerSDL *TVPWindowLayerSDL::s_ActiveWindow = nullptr;
 TVPWindowLayerSDL *TVPWindowLayerSDL::s_LastWindow = nullptr;
@@ -229,13 +233,27 @@ tjs_uint32 TVPGetCurrentShiftKeyState() {
 }
 void TVPConsoleLog(const ttstr &l, bool) {
 	__android_log_print(ANDROID_LOG_INFO, TAG, "%s", l.AsNarrowStdString().c_str());
+	// Also forward to Java-side log buffer for in-app log viewer
+	JNIEnv *env = jni::GetEnv();
+	if (!env) return;
+	env->ExceptionClear();
+	jclass cls = env->FindClass("org/tvp/kirikiri2/KR2Activity");
+	if (!cls) return;
+	jmethodID mid = env->GetStaticMethodID(cls, "addEngineLog", "(Ljava/lang/String;)V");
+	if (mid) {
+		std::string s = l.AsNarrowStdString();
+		jstring js = env->NewStringUTF(s.c_str());
+		env->CallStaticVoidMethod(cls, mid, js);
+		env->DeleteLocalRef(js);
+	}
+	env->DeleteLocalRef(cls);
 }
 
 //------------------------------------------------------------------------------
 // Per-frame engine tick
 //------------------------------------------------------------------------------
 static struct { int w, h; std::vector<uint32_t> pix; } g_frameBuf;
-static int g_gameW = 0, g_gameH = 0;
+int g_gameW = 0, g_gameH = 0;
 static struct {
 	std::chrono::steady_clock::time_point lastLog;
 	int frameCount, framesWithDraws, drawCallCount;
@@ -591,6 +609,7 @@ void TVPEngineTick() {
 
 	// Android native overlay (FPS/memory) — works for both Software and Vulkan modes
 	_updateDebugOverlayJNI(false);
+	TVPUpdateCursorOverlay();
 }
 
 //------------------------------------------------------------------------------
@@ -635,38 +654,90 @@ void TVPForwardKeyEvent(int keyCode, bool isPress) {
 	}
 }
 
+// Touch→mouse state for cursor mode (trackpad behavior)
+static struct { bool tracking; float startX, startY; int moved; } g_touchState;
+
 void TVPForwardTouchBegin(int id, float x, float y) {
 	TVPWindowLayerSDL *win = TVPWindowLayerSDL::GetActiveWindow();
 	if (!win) return;
-	float origX = x, origY = y;
-	_screenToGame(x, y);
-	__android_log_print(ANDROID_LOG_INFO, TAG, "TOUCH: screen=(%.0f,%.0f) game=(%.0f,%.0f) gW=%d gH=%d sW=%d sH=%d stretch=%d",
-		origX, origY, x, y, g_gameW, g_gameH, s_ScreenWidth, s_ScreenHeight, g_fullscreenStretch);
-	win->m_LastMouseX = (tjs_int)x; win->m_LastMouseY = (tjs_int)y;
-	s_Scancode[VK_LBUTTON] = 0x11;
-	if (win->GetWindow()) {
-		TVPPostInputEvent(new tTVPOnMouseMoveInputEvent(win->GetWindow(), win->m_LastMouseX, win->m_LastMouseY, TVPGetCurrentShiftKeyState()));
-		TVPPostInputEvent(new tTVPOnMouseDownInputEvent(win->GetWindow(), win->m_LastMouseX, win->m_LastMouseY, mbLeft, TVPGetCurrentShiftKeyState()));
+	if (!g_mouseMode) {
+		// Touch mode: direct touch = click
+		float gx = x, gy = y;
+		_screenToGame(gx, gy);
+		win->m_LastMouseX = (tjs_int)gx; win->m_LastMouseY = (tjs_int)gy;
+		s_Scancode[VK_LBUTTON] = 0x11;
+		if (win->GetWindow()) {
+			TVPPostInputEvent(new tTVPOnMouseMoveInputEvent(win->GetWindow(), win->m_LastMouseX, win->m_LastMouseY, TVPGetCurrentShiftKeyState()));
+			TVPPostInputEvent(new tTVPOnMouseDownInputEvent(win->GetWindow(), win->m_LastMouseX, win->m_LastMouseY, mbLeft, TVPGetCurrentShiftKeyState()));
+		}
+	} else {
+		// Cursor mode (trackpad): start tracking, don't click
+		g_touchState.tracking = true;
+		g_touchState.startX = x; g_touchState.startY = y;
+		g_touchState.moved = 0;
 	}
 }
 
 void TVPForwardTouchEnd(int id, float x, float y) {
 	TVPWindowLayerSDL *win = TVPWindowLayerSDL::GetActiveWindow();
 	if (!win) return;
-	_screenToGame(x, y);
-	win->m_LastMouseX = (tjs_int)x; win->m_LastMouseY = (tjs_int)y;
-	s_Scancode[VK_LBUTTON] &= 0x10;
-	if (win->GetWindow())
-		TVPPostInputEvent(new tTVPOnMouseUpInputEvent(win->GetWindow(), win->m_LastMouseX, win->m_LastMouseY, mbLeft, TVPGetCurrentShiftKeyState()));
+	if (!g_mouseMode) {
+		float gx = x, gy = y;
+		_screenToGame(gx, gy);
+		win->m_LastMouseX = (tjs_int)gx; win->m_LastMouseY = (tjs_int)gy;
+		s_Scancode[VK_LBUTTON] &= 0x10;
+		if (win->GetWindow())
+			TVPPostInputEvent(new tTVPOnMouseUpInputEvent(win->GetWindow(), win->m_LastMouseX, win->m_LastMouseY, mbLeft, TVPGetCurrentShiftKeyState()));
+	} else if (g_touchState.tracking) {
+		g_touchState.tracking = false;
+		// If finger barely moved → tap = click at cursor position
+		if (g_touchState.moved < 10) {
+			win->m_LastMouseX = g_cursorX; win->m_LastMouseY = g_cursorY;
+			s_Scancode[VK_LBUTTON] = 0x11;
+			if (win->GetWindow()) {
+				TVPPostInputEvent(new tTVPOnMouseMoveInputEvent(win->GetWindow(), win->m_LastMouseX, win->m_LastMouseY, TVPGetCurrentShiftKeyState()));
+				TVPPostInputEvent(new tTVPOnMouseDownInputEvent(win->GetWindow(), win->m_LastMouseX, win->m_LastMouseY, mbLeft, TVPGetCurrentShiftKeyState()));
+			}
+			s_Scancode[VK_LBUTTON] &= 0x10;
+			if (win->GetWindow())
+				TVPPostInputEvent(new tTVPOnMouseUpInputEvent(win->GetWindow(), win->m_LastMouseX, win->m_LastMouseY, mbLeft, TVPGetCurrentShiftKeyState()));
+		}
+	}
 }
 
 void TVPForwardTouchMove(int id, float x, float y) {
 	TVPWindowLayerSDL *win = TVPWindowLayerSDL::GetActiveWindow();
 	if (!win) return;
-	_screenToGame(x, y);
-	win->m_LastMouseX = (tjs_int)x; win->m_LastMouseY = (tjs_int)y;
-	if (win->GetWindow())
-		TVPPostInputEvent(new tTVPOnMouseMoveInputEvent(win->GetWindow(), win->m_LastMouseX, win->m_LastMouseY, TVPGetCurrentShiftKeyState()), TVP_EPT_DISCARDABLE);
+	if (!g_mouseMode) {
+		float gx = x, gy = y;
+		_screenToGame(gx, gy);
+		win->m_LastMouseX = (tjs_int)gx; win->m_LastMouseY = (tjs_int)gy;
+		if (win->GetWindow())
+			TVPPostInputEvent(new tTVPOnMouseMoveInputEvent(win->GetWindow(), win->m_LastMouseX, win->m_LastMouseY, TVPGetCurrentShiftKeyState()), TVP_EPT_DISCARDABLE);
+	} else if (g_touchState.tracking) {
+		// Trackpad: convert absolute positions to game coords, then delta
+		float prevGx = g_touchState.startX, prevGy = g_touchState.startY;
+		_screenToGame(prevGx, prevGy);
+		float curGx = x, curGy = y;
+		_screenToGame(curGx, curGy);
+		float dx = curGx - prevGx;
+		float dy = curGy - prevGy;
+
+		// Dead zone: ignore tiny jitter
+		if (fabsf(dx) < 0.5f && fabsf(dy) < 0.5f) return;
+
+		g_touchState.startX = x; g_touchState.startY = y;
+		g_touchState.moved += (int)(fabsf(dx) + fabsf(dy));
+
+		g_cursorX = std::max(0, std::min(g_gameW - 1, (int)(g_cursorX + dx)));
+		g_cursorY = std::max(0, std::min(g_gameH - 1, (int)(g_cursorY + dy)));
+
+		// Send mouse move to engine for hover effects
+		win->m_LastMouseX = g_cursorX; win->m_LastMouseY = g_cursorY;
+		if (win->GetWindow())
+			TVPPostInputEvent(new tTVPOnMouseMoveInputEvent(win->GetWindow(),
+				win->m_LastMouseX, win->m_LastMouseY, TVPGetCurrentShiftKeyState()), TVP_EPT_DISCARDABLE);
+	}
 }
 
 void TVPForwardTouchCancel(int id, float x, float y) { TVPForwardTouchEnd(id, x, y); }

@@ -38,6 +38,12 @@
             android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|locale|layoutDirection|smallestScreenSize|uiMode"
             android:theme="@style/LauncherTheme"
             android:exported="false" />
+        <activity android:name="com.yuri.kirikiri2.LogViewerActivity"
+            android:theme="@style/LauncherTheme"
+            android:exported="false" />
+        <activity android:name="com.yuri.kirikiri2.VideoPlayerActivity"
+            android:theme="@style/LauncherTheme"
+            android:exported="false" />
         <activity android:name=".MainActivity"
             android:screenOrientation="sensorLandscape"
                   android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|locale|layoutDirection|smallestScreenSize|uiMode"

@@ -35,6 +35,18 @@
 				app:iconTint="@color/on_primary" />
 
 			<com.google.android.material.button.MaterialButton
+				android:id="@+id/btnLogcat"
+				style="@style/Widget.Material3.Button.TextButton"
+				android:layout_width="40dp"
+				android:layout_height="40dp"
+				android:layout_gravity="center"
+				android:insetTop="0dp"
+				android:insetBottom="0dp"
+				app:icon="@drawable/ic_refresh"
+				app:iconSize="18dp"
+				app:iconTint="@color/on_primary" />
+
+			<com.google.android.material.button.MaterialButton
 				android:id="@+id/btnAbout"
 				style="@style/Widget.Material3.Button.TextButton"
 				android:layout_width="40dp"
@@ -70,10 +82,10 @@
 		android:layout_width="match_parent"
 		android:layout_height="wrap_content"
 		android:layout_margin="8dp"
+		android:visibility="gone"
 		app:cardCornerRadius="12dp"
 		app:cardElevation="2dp"
-		app:strokeWidth="0dp"
-		android:visibility="gone">
+		app:strokeWidth="0dp">
 
 		<LinearLayout
 			android:layout_width="match_parent"
@@ -94,6 +106,7 @@
 				android:id="@+id/recentList"
 				android:layout_width="match_parent"
 				android:layout_height="wrap_content"
+				android:maxHeight="200dp"
 				android:nestedScrollingEnabled="false" />
 		</LinearLayout>
 	</com.google.android.material.card.MaterialCardView>

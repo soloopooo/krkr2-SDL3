@@ -68,11 +68,15 @@ public class LauncherActivity extends AppCompatActivity {
 			entry -> {
 				if (entry.isDirectory) {
 					loadDir(new File(entry.fullPath));
-				} else if (entry.isGame) {
-					addRecent(entry.fullPath);
-					startGame(entry.fullPath);
-				}
-			},
+			} else if (entry.isGame) {
+				addRecent(entry.fullPath);
+				startGame(entry.fullPath);
+			} else if (entry.isVideo) {
+				Intent intent = new Intent(this, VideoPlayerActivity.class);
+				intent.putExtra("videoPath", entry.fullPath);
+				startActivity(intent);
+			}
+		},
 			(entry, pos) -> showFileMenu(entry, pos)
 		);
 
@@ -106,15 +110,31 @@ public class LauncherActivity extends AppCompatActivity {
 
 		findViewById(R.id.btnSettings).setOnClickListener(v ->
 			startActivity(new Intent(this, SettingsActivity.class)));
+		findViewById(R.id.btnLogcat).setOnClickListener(v ->
+			startActivity(new Intent(this, LogViewerActivity.class)));
 		findViewById(R.id.btnAbout).setOnClickListener(v -> showAboutDialog());
 
 		loadRecent();
 		refreshRecentCard();
 
-		// Start at /storage/emulated/0 or fallback to internal
-		File defaultDir = new File("/storage/emulated/0");
-		if (!defaultDir.isDirectory()) defaultDir = getExternalFilesDir(null);
-		if (defaultDir != null) loadDir(defaultDir);
+		// Determine startup directory
+		File startDir = null;
+		// 1. Check saved last_path if remember_last_path is enabled
+		boolean rem = getBoolFromPref("remember_last_path", true);
+		if (rem) {
+			String saved = getSharedPreferences("launcher", MODE_PRIVATE)
+				.getString("last_path", "");
+			if (!saved.isEmpty()) {
+				File f = new File(saved);
+				if (f.isDirectory()) startDir = f;
+			}
+		}
+		// 2. Fallback to /storage/emulated/0 or internal
+		if (startDir == null) {
+			startDir = new File("/storage/emulated/0");
+			if (!startDir.isDirectory()) startDir = getExternalFilesDir(null);
+		}
+		if (startDir != null) loadDir(startDir);
 	}
 
 	//--------------------------------------------------------------------------
@@ -126,6 +146,9 @@ public class LauncherActivity extends AppCompatActivity {
 		mCurrentDir = dir;
 		updateBreadcrumbs(dir);
 		new LoadTask().execute(dir);
+		// Remember last path
+		getSharedPreferences("launcher", MODE_PRIVATE).edit()
+			.putString("last_path", dir.getAbsolutePath()).apply();
 	}
 
 	private void updateBreadcrumbs(File dir) {
@@ -212,12 +235,12 @@ public class LauncherActivity extends AppCompatActivity {
 		popup.getMenu().add(0, 3, 0, "Delete");
 		popup.getMenu().add(0, 4, 0, "Rename");
 
-		if (entry.isGame) {
+		if (entry.isGame || entry.isVideo) {
 			popup.getMenu().add(0, 7, 0, "Play");
 		}
 
 		String lower = entry.name.toLowerCase();
-		if (!entry.isDirectory && (lower.endsWith(".xp3") || lower.endsWith(".xp4"))) {
+		if (!entry.isDirectory && !entry.isVideo && (lower.endsWith(".xp3") || lower.endsWith(".xp4"))) {
 			popup.getMenu().add(0, 5, 0, "Extract XP3");
 		}
 
@@ -234,8 +257,14 @@ public class LauncherActivity extends AppCompatActivity {
 				case 5: extractXP3(new File(entry.fullPath)); return true;
 				case 6: pasteFiles(); return true;
 				case 7:
-					addRecent(entry.fullPath);
-					startGame(entry.fullPath);
+					if (entry.isVideo) {
+						Intent vIntent = new Intent(this, VideoPlayerActivity.class);
+						vIntent.putExtra("videoPath", entry.fullPath);
+						startActivity(vIntent);
+					} else {
+						addRecent(entry.fullPath);
+						startGame(entry.fullPath);
+					}
 					return true;
 			}
 			return false;
@@ -434,6 +463,32 @@ public class LauncherActivity extends AppCompatActivity {
 	}
 
 	//--------------------------------------------------------------------------
+	// Read engine config from GlobalPreference.xml
+	//--------------------------------------------------------------------------
+	private boolean getBoolFromPref(String key, boolean def) {
+		try {
+			File base = getExternalFilesDir(null);
+			if (base == null) return def;
+			File f = new File(base, ".preference/GlobalPreference.xml");
+			if (!f.exists()) return def;
+			FileInputStream is = new FileInputStream(f);
+			XmlPullParser parser = XmlPullParserFactory.newInstance().newPullParser();
+			parser.setInput(is, "UTF-8");
+			int event;
+			while ((event = parser.next()) != XmlPullParser.END_DOCUMENT) {
+				if (event == XmlPullParser.START_TAG && "Item".equals(parser.getName())) {
+					String k = parser.getAttributeValue(null, "key");
+					String v = parser.getAttributeValue(null, "value");
+					if (key.equals(k))
+						return v.equals("1") || v.equals("true");
+				}
+			}
+			is.close();
+		} catch (Exception ignored) {}
+		return def;
+	}
+
+	//--------------------------------------------------------------------------
 	// File I/O utilities
 	//--------------------------------------------------------------------------
 
@@ -603,6 +658,8 @@ public class LauncherActivity extends AppCompatActivity {
 
 				if (e.isDirectory) {
 					e.isGame = f.canRead() && new File(f, "startup.tjs").exists();
+				} else if (isVideoFile(name)) {
+					e.isVideo = true;
 				} else if (isBootableFile(f)) {
 					String lower = name.toLowerCase();
 					if (lower.endsWith(".xp3") || lower.endsWith(".xp4")) {
@@ -634,6 +691,15 @@ public class LauncherActivity extends AppCompatActivity {
 	}
 
 	/** Check if a file is a bootable archive (XP3, or EXE with embedded XP3). */
+	private static final String[] VIDEO_EXTS = {".mp4", ".avi", ".mkv", ".wmv", ".flv", ".mov", ".webm", ".m4v", ".mpg", ".mpeg"};
+
+	private static boolean isVideoFile(String name) {
+		String lower = name.toLowerCase();
+		for (String ext : VIDEO_EXTS)
+			if (lower.endsWith(ext)) return true;
+		return false;
+	}
+
 	private static boolean isBootableFile(File f) {
 		String name = f.getName().toLowerCase();
 		if (name.endsWith(".xp3") || name.endsWith(".xp4")) return true;

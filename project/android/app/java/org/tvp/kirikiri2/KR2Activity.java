@@ -404,6 +404,8 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
 	static private native void initDump(String path);
 	static private native void nativeShowGameMenu();
 	static private native void nativeToggleMouseMode();
+	static private native boolean nativeGetMouseMode();
+	static private native void nativeSetMouseMode(boolean on);
 	static private native void nativeShowKeyboard();
 	static private native void nativeGameMenuExit();
 	static private native boolean nativeIsFullscreenStretch();
@@ -919,6 +921,26 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
     }
 
     //--------------------------------------------------------------------------
+    // Engine log buffer (fed from C++ TVPConsoleLog via JNI)
+    //--------------------------------------------------------------------------
+    private static final int MAX_ENGINE_LOGS = 2000;
+    private static final java.util.ArrayList<String> sEngineLogs = new java.util.ArrayList<>();
+
+    public static void addEngineLog(final String line) {
+        synchronized (sEngineLogs) {
+            sEngineLogs.add(line);
+            while (sEngineLogs.size() > MAX_ENGINE_LOGS)
+                sEngineLogs.remove(0);
+        }
+    }
+
+    public static String[] getEngineLogs() {
+        synchronized (sEngineLogs) {
+            return sEngineLogs.toArray(new String[0]);
+        }
+    }
+
+    //--------------------------------------------------------------------------
     // Debug overlay (FPS/memory) — Android native TextView on top of SDL surface
     //--------------------------------------------------------------------------
     private static TextView mDebugOverlay = null;
@@ -962,6 +984,52 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
             public void run() {
                 if (mDebugOverlay != null)
                     mDebugOverlay.setText(text);
+            }
+        });
+    }
+
+    //--------------------------------------------------------------------------
+    // Virtual cursor overlay — simple View added to mLayout
+    //--------------------------------------------------------------------------
+    private static android.widget.ImageView mCursorView = null;
+
+    public static void setCursorVisible(final boolean show) {
+        msgHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (show && mCursorView == null && sInstance != null) {
+                    mCursorView = new android.widget.ImageView(sInstance);
+                    mCursorView.setImageResource(
+                        com.yuri.kirikiri2.R.drawable.ic_cursor);
+                    mCursorView.setAlpha(0.85f);
+                    mCursorView.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null);
+                    float density = sInstance.getResources().getDisplayMetrics().density;
+                    int size = (int)(48 * density + 0.5f);
+                    android.widget.FrameLayout.LayoutParams lp =
+                        new android.widget.FrameLayout.LayoutParams(size, size);
+                    lp.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
+                    lp.leftMargin = 100; lp.topMargin = 100;
+                    mCursorView.setLayoutParams(lp);
+                    sInstance.mLayout.addView(mCursorView);
+                }
+                if (mCursorView != null)
+                    mCursorView.setVisibility(show ? View.VISIBLE : View.GONE);
+            }
+        });
+    }
+
+    public static void setCursorPos(final int x, final int y) {
+        final android.widget.ImageView v = mCursorView;
+        if (v == null) { setCursorVisible(true); return; }
+        msgHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (v.getParent() == null) return;
+                android.view.ViewGroup.MarginLayoutParams lp =
+                    (android.view.ViewGroup.MarginLayoutParams)v.getLayoutParams();
+                lp.leftMargin = x;
+                lp.topMargin = y;
+                v.setLayoutParams(lp);
             }
         });
     }
@@ -1101,6 +1169,21 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
     }
 
     //--------------------------------------------------------------------------
+    // Persistent mouse mode setting
+    //--------------------------------------------------------------------------
+    private static void saveMouseMode(boolean on) {
+        if (sInstance == null) return;
+        sInstance.getSharedPreferences("engine", MODE_PRIVATE)
+            .edit().putBoolean("mouse_mode", on).apply();
+    }
+
+    private static boolean loadMouseMode() {
+        if (sInstance == null) return true;
+        return sInstance.getSharedPreferences("engine", MODE_PRIVATE)
+            .getBoolean("mouse_mode", true);
+    }
+
+    //--------------------------------------------------------------------------
     // GameMenuOverlay — draggable floating button + popup menu
     //--------------------------------------------------------------------------
     static class GameMenuOverlay {
@@ -1115,6 +1198,12 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
 
         static GameMenuOverlay attach(KR2Activity activity) {
             GameMenuOverlay overlay = new GameMenuOverlay();
+            // Restore persisted mouse mode
+            boolean saved = loadMouseMode();
+            overlay.mMouseMode = saved;
+            nativeSetMouseMode(saved);
+            // Show cursor overlay immediately if mouse mode is on
+            if (saved) setCursorVisible(true);
             overlay.create(activity);
             overlay.show();
             return overlay;
@@ -1191,6 +1280,7 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
                 case ITEM_MOUSE_MODE:
                     mMouseMode = !mMouseMode;
                     nativeToggleMouseMode();
+                    saveMouseMode(mMouseMode);
                     break;
                 case ITEM_KEYBOARD:
                     nativeShowKeyboard();

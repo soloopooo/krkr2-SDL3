@@ -161,7 +161,8 @@ Java_org_tvp_kirikiri2_KR2Activity_nativeSetStartupArgs(JNIEnv *env, jclass,
 extern tTJSNI_Window *TVPGetActiveWindow();
 extern void TVPShowIME(tjs_int x, tjs_int y, tjs_int w, tjs_int h);
 
-static bool g_mouseMode = true;
+bool g_mouseMode = true;
+int g_cursorX = 0, g_cursorY = 0;
 extern bool g_fullscreenStretch;
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -259,6 +260,43 @@ Java_org_tvp_kirikiri2_KR2Activity_nativeShowGameMenu(JNIEnv*, jclass) {
 extern "C" JNIEXPORT void JNICALL
 Java_org_tvp_kirikiri2_KR2Activity_nativeToggleMouseMode(JNIEnv*, jclass) {
 	g_mouseMode = !g_mouseMode;
+}
+extern "C" JNIEXPORT jboolean JNICALL
+Java_org_tvp_kirikiri2_KR2Activity_nativeGetMouseMode(JNIEnv*, jclass) {
+	return (jboolean)g_mouseMode;
+}
+extern "C" JNIEXPORT void JNICALL
+Java_org_tvp_kirikiri2_KR2Activity_nativeSetMouseMode(JNIEnv*, jclass, jboolean on) {
+	g_mouseMode = on;
+}
+
+void TVPUpdateCursorOverlay() {
+	JNIEnv *env = jni::GetEnv();
+	if (!env) return;
+	env->ExceptionClear();
+
+	// Sync visibility with g_mouseMode state changes
+	static bool s_prevMouseMode = false;
+	if (g_mouseMode != s_prevMouseMode) {
+		s_prevMouseMode = g_mouseMode;
+		jclass cls = env->FindClass("org/tvp/kirikiri2/KR2Activity");
+		if (cls) {
+			jmethodID mid = env->GetStaticMethodID(cls, "setCursorVisible", "(Z)V");
+			if (mid) env->CallStaticVoidMethod(cls, mid, (jboolean)g_mouseMode);
+			env->DeleteLocalRef(cls);
+		}
+	}
+
+	if (!g_mouseMode) return;
+	jclass cls = env->FindClass("org/tvp/kirikiri2/KR2Activity");
+	if (!cls) return;
+	jmethodID mid = env->GetStaticMethodID(cls, "setCursorPos", "(II)V");
+	if (mid) {
+		int sx = g_cursorX * s_ScreenWidth / (g_gameW ? g_gameW : 1);
+		int sy = g_cursorY * s_ScreenHeight / (g_gameH ? g_gameH : 1);
+		env->CallStaticVoidMethod(cls, mid, sx, sy);
+	}
+	env->DeleteLocalRef(cls);
 }
 
 extern "C" JNIEXPORT void JNICALL
