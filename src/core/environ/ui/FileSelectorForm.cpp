@@ -825,6 +825,10 @@ void TVPListForm::initFromInfo(const std::vector<cocos2d::ui::Widget*> &cells) {
 		size.width = width;
 		cell->setContentSize(size);
 		ui::Helper::doLayout(cell);
+		// ListView requires each item to have a LinearLayoutParameter
+		auto lp = LinearLayoutParameter::create();
+		lp->setGravity(LinearLayoutParameter::LinearGravity::CENTER_HORIZONTAL);
+		cell->setLayoutParameter(lp);
 		listview->pushBackCustomItem(cell);
 	}
 	if(!listview->getItems().empty()) {

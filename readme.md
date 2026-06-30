@@ -75,7 +75,7 @@ You can also download the prebuilt ports from [thirdparty_port.tar.gz](https://g
 ## (2) android  
 
 - android sdk with `ANDROID_HOME` variable in env  
-- android ndk 25.2.9519653  
+- android ndk 29.0.14206865  
 
 See `_androida64.sh` for how to build dependencies.
 Use `script/cross_androida64.sh` to build ports and the use `project/android/gradlew assembleDebug` to build apk.

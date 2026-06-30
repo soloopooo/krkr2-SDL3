@@ -10,6 +10,7 @@
 #include "ui/MessageBox.h"
 #include "ui/GlobalPreferenceForm.h"
 #include "CustomFileUtils.h"
+#include "sdl/TVPSDL.h"
 
 USING_NS_CC;
 
@@ -55,6 +56,7 @@ bool TVPAppDelegate::applicationDidFinishLaunching() {
 	glview->setDesignResolutionSize(designSize.width, designSize.height, ResolutionPolicy::SHOW_ALL);
 
 	Size frameSize = glview->getFrameSize();
+	TVPSDLSetScreenSize((int)frameSize.width, (int)frameSize.height);
 
 	std::vector<std::string> searchPath;
 
@@ -85,15 +87,7 @@ bool TVPAppDelegate::applicationDidFinishLaunching() {
 	// run
 	director->runWithScene(scene);
 
-	//director->getConsole()->listenOnTCP(16006);
-
-	scene->scheduleOnce([](float dt){
-		TVPMainScene::GetInstance()->unschedule("launch");
-		TVPGlobalPreferenceForm::Initialize();
-		if (!TVPCheckStartupArg()) {
-			TVPMainScene::GetInstance()->pushUIForm(TVPMainFileSelectorForm::create());
-		}
-	}, 0, "launch");
+	TVPInitSDL();
 
 	return true;
 }

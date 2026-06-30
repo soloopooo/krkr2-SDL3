@@ -791,9 +791,10 @@ bool TVPCreateFolders(const ttstr &folder)
 	return false;
 }
 
-static bool TVPWriteDataToFileJava(const std::string &filename, const void* data, unsigned int size) {
+	static bool TVPWriteDataToFileJava(const std::string &filename, const void* data, unsigned int size) {
 	JniMethodInfo methodInfo;
 	if (JniHelper::getStaticMethodInfo(methodInfo, "org/tvp/kirikiri2/KR2Activity", "WriteFile", "(Ljava/lang/String;[B)Z")) {
+		__android_log_print(ANDROID_LOG_INFO, "##krkr", "WriteFileJava: %s", filename.c_str());
 		cocos2d::FileUtils *fileutil = cocos2d::FileUtils::getInstance();
 		bool ret = false;
 		int retry = 3;
@@ -804,8 +805,8 @@ static bool TVPWriteDataToFileJava(const std::string &filename, const void* data
 			ret = methodInfo.env->CallStaticBooleanMethod(methodInfo.classID, methodInfo.methodID, jstr, arr);
 			methodInfo.env->DeleteLocalRef(arr);
 			methodInfo.env->DeleteLocalRef(jstr);
-			methodInfo.env->DeleteLocalRef(methodInfo.classID);
 		} while (!fileutil->isFileExist(filename) && --retry);
+		methodInfo.env->DeleteLocalRef(methodInfo.classID);
 		return ret;
 	}
 	return false;
@@ -818,6 +819,7 @@ bool TVPWriteDataToFile(const ttstr &filepath, const void *data, unsigned int si
 		std::string dir(filename.c_str(), parent - filename.c_str());
 		TVPCreateFolders(ttstr(dir));
 	}
+	__android_log_print(ANDROID_LOG_INFO, "##krkr", "WriteDataToFile: %s (size=%u)", filename.c_str(), size);
 	FILE *fp = fopen(filename.c_str(), "wb");
 	if (fp) {
 		size_t writed = fwrite(data, 1, size, fp);
@@ -911,9 +913,7 @@ bool TVP_stat(const tjs_char *name, tTVP_stat &s) {
 	return TVP_stat(holder, s);
 }
 
-#undef st_atime
-#undef st_ctime
-#undef st_mtime
+
 //int stat64(const char* __path, struct stat64* __buf) __INTRODUCED_IN(21); // force link it !
 bool TVP_stat(const char *name, tTVP_stat &s) {
 	struct stat t;
@@ -922,9 +922,9 @@ bool TVP_stat(const char *name, tTVP_stat &s) {
 	bool ret = !stat(name, &t);
 	s.st_mode = t.st_mode;
 	s.st_size = t.st_size;
-	s.st_atime = t.st_atim.tv_sec;
-	s.st_mtime = t.st_mtim.tv_sec;
-	s.st_ctime = t.st_ctim.tv_sec;
+	s.st_atime_sec = t.st_atim.tv_sec;
+	s.st_mtime_sec = t.st_mtim.tv_sec;
+	s.st_ctime_sec = t.st_ctim.tv_sec;
 	return ret;
 }
 

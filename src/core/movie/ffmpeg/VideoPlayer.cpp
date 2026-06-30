@@ -12,7 +12,9 @@
 #include "Application.h"
 #include <cstdlib>
 #include <iterator>
+#ifndef KRKR2_SDL_BUILD
 #include "platform/CCPlatformConfig.h"
+#endif
 #include "AEStream.h"
 #include "WaveMixer.h"
 

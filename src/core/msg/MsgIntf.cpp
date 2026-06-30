@@ -11,6 +11,7 @@
 #include "tjsCommHead.h"
 
 #include "tjsError.h"
+#include "DebugIntf.h"
 //---------------------------------------------------------------------------
 // import message strings
 //---------------------------------------------------------------------------
@@ -122,19 +123,23 @@ ttstr TVPFormatMessage(const tjs_char *msg, const ttstr & p1, const ttstr & p2)
 //---------------------------------------------------------------------------
 void TVPThrowExceptionMessage(const tjs_char *msg)
 {
+	TVPAddLog(ttstr(TJS_W("EXCEPTION: ")) + ttstr(msg));
 	throw eTJSError(msg);
 }
 void TVPThrowExceptionMessage(const tjs_char *msg, const ttstr & p1, tjs_int num)
 {
+	TVPAddLog(ttstr(TJS_W("EXCEPTION: ")) + ttstr(msg) + TJS_W(" ") + p1 + TJS_W(" ") + ttstr(num));
 	throw eTJSError(TVPFormatMessage(msg, p1, ttstr(num)));
 }
 void TVPThrowExceptionMessage(const tjs_char *msg, const ttstr & p1)
 {
+	TVPAddLog(ttstr(TJS_W("EXCEPTION: ")) + ttstr(msg) + TJS_W(" ") + p1);
 	throw eTJSError(TVPFormatMessage(msg, p1));
 }
 void TVPThrowExceptionMessage(const tjs_char *msg, const ttstr & p1,
 	const ttstr & p2)
 {
+	TVPAddLog(ttstr(TJS_W("EXCEPTION: ")) + ttstr(msg) + TJS_W(" ") + p1 + TJS_W(" ") + p2);
 	throw eTJSError(TVPFormatMessage(msg, p1, p2));
 }
 //---------------------------------------------------------------------------

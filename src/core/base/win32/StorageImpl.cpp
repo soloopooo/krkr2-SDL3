@@ -32,7 +32,11 @@
 #include "StringUtil.h"
 #include "FilePathUtil.h"
 #include "Platform.h"
+#ifdef KRKR2_SDL_BUILD
+// Use compiler built-in macros for platform detection
+#else
 #include "platform/CCPlatformConfig.h"
+#endif
 #include "dirent.h"
 #include "TickCount.h"
 #include <fcntl.h>
@@ -169,9 +173,9 @@ void TVPGetLocalFileListAt(const ttstr &name, const std::function<void(const tts
 			info.NativeName = direntp->d_name;
 			info.Mode = stat_buf.st_mode;
 			info.Size = stat_buf.st_size;
-			info.AccessTime = stat_buf.st_atime;
-			info.ModifyTime = stat_buf.st_mtime;
-			info.CreationTime = stat_buf.st_ctime;
+			info.AccessTime = stat_buf.st_atime_sec;
+			info.ModifyTime = stat_buf.st_mtime_sec;
+			info.CreationTime = stat_buf.st_ctime_sec;
 			cb(file, &info);
 		}
 		closedir(dirp);
@@ -230,7 +234,7 @@ static int _utf8_strcasecmp(const char *a, const char *b) {
     return *a - *b;
 }
 
-#if CC_TARGET_PLATFORM == CC_PLATFORM_IOS
+#if defined(__APPLE__)
 const std::vector<std::string> &TVPGetApplicationHomeDirectory();
 const std::vector<ttstr> &_getPrefixPath() {
 	static std::vector<ttstr> ret;
@@ -302,7 +306,7 @@ void TJS_INTF_METHOD tTVPFileMedia::GetLocallyAccessibleName(ttstr &name)
         ptr += 2;  // skip "./"
         newname.Clear();
     }
-#if CC_TARGET_PLATFORM == CC_PLATFORM_IOS
+#if defined(__APPLE__)
     {
         std::string prefix = "/";
         prefix += tTJSNarrowStringHolder(ptr).Buf;

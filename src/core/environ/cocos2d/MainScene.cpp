@@ -32,8 +32,13 @@
 #include "VideoOvlIntf.h"
 #include "Exception.h"
 #include "win32/SystemControl.h"
+#include "sdl/TVPSDL.h"
+#include "ui/GlobalPreferenceForm.h"
+#include "ui/MainFileSelectorForm.h"
 
 USING_NS_CC;
+
+extern bool TVPCheckStartupArg();
 
 enum SCENE_ORDER {
 	GAME_SCENE_ORDER,
@@ -767,7 +772,7 @@ public:
 		Director* director = Director::getInstance();
 		modal_result_ = 0;
 		while (this == _currentWindowLayer && !modal_result_) {
-			int remain = TVPDrawSceneOnce(30); // 30 fps
+			int remain = TVPDrawSceneOnce(16); // ~60 fps for modal
 			TVPProcessInputEvents(); // for iOS
 			if (::Application->IsTarminate()) {
 				modal_result_ = mrCancel;
@@ -1215,7 +1220,7 @@ public:
 	virtual void OnKeyPress(tjs_uint16 vk, int repeat, bool prevkeystate, bool convertkey) override {
 		if (TJSNativeInstance && vk) {
 			if (UseMouseKey && (vk == 0x1b || vk == 13 || vk == 32)) return;
-			// UNICODE ¤Ê¤Î¤Ç¤½¤Î¤Þ¤Þ¶É¤·¤Æ¤·¤Þ¤¦
+			// UNICODE ï¿½Ê¤Î¤Ç¤ï¿½ï¿½Î¤Þ¤Þ¶É¤ï¿½ï¿½Æ¤ï¿½ï¿½Þ¤ï¿½
 			TVPPostInputEvent(new tTVPOnKeyPressInputEvent(TJSNativeInstance, vk));
 		}
 	}
@@ -1355,7 +1360,7 @@ public:
 						// this is the main window
 						iTJSDispatch2 * obj = TJSNativeInstance->GetOwnerNoAddRef();
 						obj->Invalidate(0, NULL, NULL, obj);
-						// TJSNativeInstance = NULL; // ¤³¤Î¶ÎëA¤Ç¤Ï¼È¤Ëthis¤¬Ï÷³ý¤µ¤ì¤Æ¤¤¤ë¤¿¤á¡¢¥á¥ó¥Ð©`¤Ø¥¢¥¯¥»¥¹¤·¤Æ¤Ï¤¤¤±¤Ê¤¤
+						// TJSNativeInstance = NULL; // ï¿½ï¿½ï¿½Î¶ï¿½ï¿½Aï¿½Ç¤Ï¼È¤ï¿½thisï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æ¤ï¿½ï¿½ë¤¿ï¿½á¡¢ï¿½ï¿½ï¿½Ð©`ï¿½Ø¥ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æ¤Ï¤ï¿½ï¿½ï¿½ï¿½Ê¤ï¿½
 					}
 				} else {
 					delete this;
@@ -1574,6 +1579,16 @@ TVPMainScene* TVPMainScene::CreateInstance() {
 	return _instance;
 }
 
+void TVPMainScene::onEnter() {
+	Scene::onEnter();
+	scheduleOnce([](float){
+		TVPGlobalPreferenceForm::Initialize();
+		if (!TVPCheckStartupArg()) {
+			TVPMainScene::GetInstance()->pushUIForm(TVPMainFileSelectorForm::create());
+		}
+	}, 0.016f, "launch");
+}
+
 void TVPMainScene::initialize() {
 	auto glview = cocos2d::Director::getInstance()->getOpenGLView();
 	Size screenSize = glview->getFrameSize();
@@ -1787,7 +1802,7 @@ void TVPMainScene::doStartup(float dt, std::string path) {
 		_fpsLabel->enableOutline(Color4B::BLACK, 1);
 		GameNode->addChild(_fpsLabel, GAME_MENU_ORDER);
 	}
-	int fps = pGlobalCfgMgr->GetValue<int>("fps_limit", 60);
+	int fps = pGlobalCfgMgr->GetValue<int>("fps_limit", 120);
 	cocos2d::Director::getInstance()->setAnimationInterval(1.0f / fps);
 }
 
@@ -1795,6 +1810,7 @@ extern ttstr TVPGetErrorDialogTitle();
 void TVPOnError();
 tjs_uint TVPGetGraphicCacheTotalBytes();
 void TVPMainScene::update(float delta) {
+	TVPProcessSDLEvents();
 	::Application->Run();
 //	if (_currentWindowLayer) _currentWindowLayer->UpdateOverlay();
 	iTVPTexture2D::RecycleProcess();
@@ -2344,13 +2360,15 @@ void TVPConsoleLog(const ttstr &l, bool important) {
 	WideCharToMultiByte(CP_ACP, 0, l.c_str(), -1, buf, sizeof(buf), nullptr, FALSE);
 	puts(buf);
 #else
-    cocos2d::log("%ls", l.c_str());
-// 	std::string utf8;
-// 	if (StringUtils::UTF16ToUTF8(l.c_str(), utf8))
-// 		cocos2d::log("%s", utf8.c_str());
+	// %ls is wchar_t* on Linux (32-bit), but tjs_char is char16_t (16-bit).
+	// Using the wrong format specifier causes vsnprintf to overread memory.
+	std::string utf8;
+	if (StringUtils::UTF16ToUTF8(std::u16string((const char16_t*)l.c_str()), utf8))
+		cocos2d::log("%s", utf8.c_str());
+	else
+		cocos2d::log("[krkr2] (console log encoding error)");
 #endif
 }
-
 namespace TJS {
 	static const int MAX_LOG_LENGTH = 16 * 1024;
 	void TVPConsoleLog(const tjs_char *l) {
@@ -2388,6 +2406,11 @@ ttstr TVPGetDataPath() {
 #include "StorageImpl.h"
 static std::string _TVPGetInternalPreferencePath() {
 	std::string path = cocos2d::FileUtils::getInstance()->getWritablePath();
+	if (path.empty()) {
+		__android_log_print(ANDROID_LOG_ERROR, "##krkr",
+			"getWritablePath() returned empty path, using fallback");
+		path = "/data/data/com.yuri.kirikiri2/files/";
+	}
 	path += ".preference";
 	if (!TVPCheckExistentLocalFolder(path)) {
 		TVPCreateFolders(path);

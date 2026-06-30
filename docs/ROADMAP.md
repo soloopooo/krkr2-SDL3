@@ -29,17 +29,21 @@
 ## Phase 4 — Config / CLI
 
 - `GlobalPreference.xml` via `GlobalConfigManager`.
-- Android `TVPCheckStartupArg` (`AndroidUtils.cpp`): runs the Breakpad dump check, then consumes launch args stashed by `nativeSetStartupArgs`. `KR2Activity.onCreate` reads intent extras (`startupPath` String → `.xp3`/bootable folder; `args` String[] of `-key=value`/`-flag`) and forwards them to native globals (`g_AndroidStartupPath` / `g_AndroidStartupArgs` in `krkr2_android.cpp`). `TVPCheckStartupArg` parses options into `TVPProgramArguments` via `TVPSetCommandLine` (exposed to TJS2 as `System.commandLineArgument`) and dispatches `startupFrom(path)` when the path is a bootable archive (`TVPCheckArchive == 1`) or directory containing `startup.tjs`; otherwise falls back to the file selector. Mirrors Win32 `Platform.cpp:91-134`.
+- Android `TVPCheckStartupArg` (`AndroidUtils_sdl.cpp`): runs the Breakpad dump check, then consumes launch args stashed by `nativeSetStartupArgs`. `KR2Activity.onCreate` reads intent extras (`startupPath` String → `.xp3`/bootable folder; `args` String[] of `-key=value`/`-flag`) and forwards them to native globals (`g_AndroidStartupPath` / `g_AndroidStartupArgs` in `krkr2_android_sdl.cpp`). `TVPCheckStartupArg` parses options into `TVPProgramArguments` via `TVPSetCommandLine` (exposed to TJS2 as `System.commandLineArgument`) and dispatches `startupFrom(path)` when the path is a bootable archive (`TVPCheckArchive == 1`) or directory containing `startup.tjs`; otherwise falls back to the file selector.
 
 ## Phase 5 — Desktop
 
 - **Out of scope.** This fork is Android-only (arm64-v8a, SDK 22+). Root `CMakeLists.txt:18-23` stubs Windows/Linux with `not support yet`. No plans to build desktop targets.
 
-## Phase 6 — SDL2 (optional, lighter backend)
+## Phase 6 — SDL3 (replaced cocos2d-x — DONE)
 
-- **Optional.** Not required for the engine to work on Android; cocos2d-x remains the active backend. This phase is a future optimization to drop the heavy cocos2d-x dependency for a leaner binary.
-- Replace cocos2d-x with SDL2 in: `MainScene.cpp`, `AppDelegate.cpp`, `YUVSprite.cpp`, `environ/ui/*`, Gradle `:cocos2dx` module.
-- Note: `src/core/visual/RenderManager.cpp` is the engine's software renderer (used by some paths), not cocos rendering. It may need adaptation but is separate from the cocos migration.
+- **Status: DONE.** cocos2d-x has been entirely removed. The engine now uses SDL3 as the sole backend.
+- SDL3 provides: window creation, input (touch/key/IME), GPU API (Vulkan), audio, and Android activity bridge.
+- No `Cocos2dxActivity`, no `GLSurfaceView`, no cocos2d GL state cache.
+- GPU rendering: SDL_Gpu (Vulkan) with `TVPRenderManager_GPU` (~1050 lines, 50+ blend pipelines).
+- Fallback display: SDL_Renderer (software path).
+- Key files: `WindowLayer_sdl.cpp`, `krkr2_android_sdl.cpp`, `RenderManager_gpu.cpp`.
+- See [`SDL3_MIGRATION.md`](SDL3_MIGRATION.md) for the full migration history.
 
 ## Phase 7 — Unit tests (proposed)
 

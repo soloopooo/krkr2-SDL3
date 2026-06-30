@@ -10,6 +10,10 @@
 //---------------------------------------------------------------------------
 #include "tjsCommHead.h"
 
+#if defined(__ANDROID__)
+#include <android/log.h>
+#endif
+
 //#define DIRECTDRAW_VERSION 0x0300
 //#include <ddraw.h>
 //#include <d3d9.h>
@@ -151,7 +155,7 @@ static tjs_int TVPGetDisplayColorFormat()
 	// 0   : other modes
 
 	if( TVPDirect3D ) {
-		// ‚Ü‚¸‚Í Direct3D ‚ğ—p‚¢‚Ä 16bit color format æ“¾‚ğ‚İ‚é
+		// ï¿½Ü‚ï¿½ï¿½ï¿½ Direct3D ï¿½ï¿½pï¿½ï¿½ï¿½ï¿½ 16bit color format ï¿½æ“¾ï¿½ï¿½ï¿½ï¿½ï¿½İ‚ï¿½
 		D3DDISPLAYMODE mode = {0};
 		if( SUCCEEDED( TVPDirect3D->GetAdapterDisplayMode( D3DADAPTER_DEFAULT, &mode ) ) ) {
 			if( mode.Format == D3DFMT_R5G6B5 ) {
@@ -550,7 +554,7 @@ void TVPEnumerateAllDisplayModes(std::vector<tTVPScreenMode> & modes)
 				//D3DFMT_A2R10G10B10, // not support display
 				//D3DFMT_A8R8G8B8, // not support display
 				D3DFMT_R5G6B5,
-				// D3DFMT_X1R5G5B5, // IDirect3D9::EnumAdapterModes ‚Å‚Í D3DFMT_R5G6B5 ‚Æ“¯“™‚Æˆ—‚³‚ê‚é
+				// D3DFMT_X1R5G5B5, // IDirect3D9::EnumAdapterModes ï¿½Å‚ï¿½ D3DFMT_R5G6B5 ï¿½Æ“ï¿½ï¿½ï¿½ï¿½Æï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 				D3DFMT_X8R8G8B8
 			};
 			static const int NumOfFormat = sizeof(PixelFormatTypes) / sizeof(PixelFormatTypes[0]);
@@ -575,7 +579,7 @@ void TVPEnumerateAllDisplayModes(std::vector<tTVPScreenMode> & modes)
 							sm.BitsPerPixel = 32;
 							modes.push_back(sm);
 						} else {
-							// unknown ‚±‚±‚Å‚Í–³‹
+							// unknown ï¿½ï¿½ï¿½ï¿½ï¿½Å‚Í–ï¿½ï¿½ï¿½
 						}
 					}
 				}
@@ -653,7 +657,7 @@ static void TVPMakeFullScreenModeCandidates(
 	std::vector<tTVPScreenMode> modes;
 	TVPEnumerateAllDisplayModes(modes);
 	std::sort(modes.begin(), modes.end()); // sort by area, and bpp
-	{	// d•¡‚·‚é€–Ú‚ğíœ‚·‚é(ƒŠƒtƒŒƒbƒVƒ…ƒŒ[ƒg‚Åd•¡‚·‚é‰Â”\«‚ª‚ ‚é)
+	{	// ï¿½dï¿½ï¿½ï¿½ï¿½ï¿½é€ï¿½Ú‚ï¿½ï¿½íœï¿½ï¿½ï¿½ï¿½(ï¿½ï¿½ï¿½tï¿½ï¿½ï¿½bï¿½Vï¿½ï¿½ï¿½ï¿½ï¿½[ï¿½gï¿½Ådï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Â”\ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½)
 		std::vector<tTVPScreenMode>::iterator new_end = std::unique(modes.begin(),modes.end());
 		modes.erase(new_end, modes.end());
 	}
@@ -1496,7 +1500,13 @@ void tTJSNI_Window::RegisterWindowMessageReceiver(tTVPWMRRegMode mode,
 //---------------------------------------------------------------------------
 void tTJSNI_Window::Close()
 {
-	if(Form) Form->Close();
+	__android_log_print(ANDROID_LOG_INFO, "##krkr", "tTJSNI_Window::Close Form=%p Owner=%p", Form, Owner);
+	if(Form) {
+		__android_log_print(ANDROID_LOG_INFO, "##krkr", "  calling Form->Close()");
+		Form->Close();
+		__android_log_print(ANDROID_LOG_INFO, "##krkr", "  Form->Close() returned");
+	}
+	__android_log_print(ANDROID_LOG_INFO, "##krkr", "tTJSNI_Window::Close done");
 }
 //---------------------------------------------------------------------------
 void tTJSNI_Window::OnCloseQueryCalled(bool b)

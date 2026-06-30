@@ -12,6 +12,9 @@
 #include "tjsCommHead.h"
 
 #include <stdlib.h>
+#if defined(ANDROID) || defined(__ANDROID__)
+#include <android/log.h>
+#endif
 #include "GraphicsLoaderIntf.h"
 #include "LayerBitmapIntf.h"
 #include "LayerIntf.h"
@@ -1491,13 +1494,14 @@ public:
             default:
                 return;
             }
-			Texture = TVPGetRenderManager()->CreateTexture2D(Bitmap);
+				Texture = TVPGetRenderManager()->CreateTexture2D(Bitmap);
 			if (Bitmap) Bitmap->Release(), Bitmap = nullptr;
 			if (RawData) delete[] RawData, RawData = nullptr;
         }
 
-        if (Texture)
+        if (Texture) {
             dst->AssignTexture(Texture);
+        }
     }
 
 	tjs_uint GetSize() const { return Size; }
@@ -1965,7 +1969,7 @@ void TVPLoadGraphicProvince(tTVPBaseBitmap *dest, const ttstr &name, tjs_int key
 //---------------------------------------------------------------------------
 // TVPLoadGraphic (to texture), return size
 //---------------------------------------------------------------------------
-int TVPLoadGraphic(iTVPBaseBitmap *dest, const ttstr &name, tjs_int32 keyidx,
+	int TVPLoadGraphic(iTVPBaseBitmap *dest, const ttstr &name, tjs_int32 keyidx,
 	tjs_uint desw, tjs_uint desh,
 	tTVPGraphicLoadMode mode, ttstr *provincename, iTJSDispatch2 ** metainfo)
 {
@@ -2002,7 +2006,6 @@ int TVPLoadGraphic(iTVPBaseBitmap *dest, const ttstr &name, tjs_int32 keyidx,
 #if defined( WIN32 )&& defined(_DEBUG)
 	TVPAddLog(TJS_W("load graphic: ") + nname);
 #endif
-
 	// load into dest
 	tTVPGraphicImageData * data = NULL;
 

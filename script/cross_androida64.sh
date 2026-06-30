@@ -34,7 +34,7 @@ function fetch_ports()
     fetch_breakpad
 
     # framework
-    fetch_sdl2
+    fetch_sdl3
     fetch_cocos2dx    
 }
 
@@ -64,11 +64,11 @@ function build_ports()
     build_breakpad
 
     # framework
-    build_sdl2
+    build_sdl3
     build_cocos2dx
 }
 
-# prepare env, tested with ndk 25.2.9519653
+# prepare env, tested with ndk 29.0.14206865
 if [ -z "$ANDROID_HOME" ]; then ANDROID_HOME=/d/Software/env/sdk/androidsdk; fi
 NDK_HOME=$ANDROID_HOME/ndk/$(ls -A $ANDROID_HOME/ndk | tail -n 1)
 PREBUILT_DIR=$NDK_HOME/toolchains/llvm/prebuilt

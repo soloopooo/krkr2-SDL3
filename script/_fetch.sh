@@ -88,6 +88,20 @@ function fetch_sdl2()
     fetch_port https://www.libsdl.org/release $SDL2_NAME
 }
 
+function fetch_sdl3()
+{
+    SDL3_NAME=SDL3-3.4.10
+    SDL3_SRC=$CMAKELISTS_PATH/thirdparty/port/$SDL3_NAME
+    if ! [ -d "$SDL3_SRC" ]; then
+        echo "## fetch_sdl3 from github"
+        wget https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.4.10.tar.gz \
+            -O $CMAKELISTS_PATH/thirdparty/port/$SDL3_NAME.tar.gz
+        tar zxf $CMAKELISTS_PATH/thirdparty/port/$SDL3_NAME.tar.gz \
+            -C $CMAKELISTS_PATH/thirdparty/port
+        mv $CMAKELISTS_PATH/thirdparty/port/SDL-release-3.4.10 $SDL3_SRC
+    fi
+}
+
 # git ports
 function fetch_openal()
 {

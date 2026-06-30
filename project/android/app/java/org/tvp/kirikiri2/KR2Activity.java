@@ -5,7 +5,6 @@ import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.ActivityManager;
-import android.app.AlertDialog;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
@@ -26,26 +25,31 @@ import android.os.storage.StorageManager;
 import android.preference.PreferenceManager;
 import android.provider.BaseColumns;
 import android.provider.MediaStore;
-import android.util.AttributeSet;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.inputmethod.BaseInputConnection;
-import android.view.inputmethod.EditorInfo;
-import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.core.app.ActivityCompat;
 import androidx.documentfile.provider.DocumentFile;
 
-import org.cocos2dx.lib.Cocos2dxActivity;
-import org.cocos2dx.lib.Cocos2dxGLSurfaceView;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import android.widget.PopupMenu;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Color;
+
+
+import org.libsdl.app.SDLActivity;
+import org.libsdl.app.SDLSurface;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -96,131 +100,13 @@ abstract class MediaStoreUtil {
 
 }
 
-/* This is a fake invisible editor view that receives the input and defines the
- * pan&scan region
- */
-class DummyEdit extends View implements View.OnKeyListener {
-    InputConnection ic;
-
-    public DummyEdit(Context context) {
-        super(context);
-        setFocusableInTouchMode(true);
-        setFocusable(true);
-        setOnKeyListener(this);
-    }
-
-    @Override
-    public boolean onCheckIsTextEditor() {
-        return true;
-    }
-
-    @Override
-    public boolean onKey(View v, int keyCode, KeyEvent event) {
-
-        // This handles the hardware keyboard input
-        if (event.isPrintingKey()) {
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                ic.commitText(String.valueOf((char) event.getUnicodeChar()), 1);
-            }
-            return true;
-        }
-        return false;
-    }
-        
-    //
-    @Override
-    public boolean onKeyPreIme (int keyCode, KeyEvent event) {
-        // As seen on StackOverflow: http://stackoverflow.com/questions/7634346/keyboard-hide-event
-        // FIXME: Discussion at http://bugzilla.libsdl.org/show_bug.cgi?id=1639
-        // FIXME: This is not a 100% effective solution to the problem of detecting if the keyboard is showing or not
-        // FIXME: A more effective solution would be to change our Layout from AbsoluteLayout to Relative or Linear
-        // FIXME: And determine the keyboard presence doing this: http://stackoverflow.com/questions/2150078/how-to-check-visibility-of-software-keyboard-in-android
-        // FIXME: An even more effective way would be if Android provided this out of the box, but where would the fun be in that :)
-        if (event.getAction()==KeyEvent.ACTION_UP && keyCode == KeyEvent.KEYCODE_BACK) {
-            if (KR2Activity.mTextEdit != null && KR2Activity.mTextEdit.getVisibility() == View.VISIBLE) {
-            	KR2Activity.hideTextInput();
-            	//KR2Activity.nativeKeyboardFocusLost();
-            }
-        }
-        return super.onKeyPreIme(keyCode, event);
-    }
-
-    @Override
-    public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
-        ic = new SDLInputConnection(this, true);
-
-        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
-                | 33554432 /* API 11: EditorInfo.IME_FLAG_NO_FULLSCREEN */;
-
-        return ic;
-    }
-}
-
-class SDLInputConnection extends BaseInputConnection {
-
-    public SDLInputConnection(View targetView, boolean fullEditor) {
-        super(targetView, fullEditor);
-
-    }
-
-    @Override
-    public boolean sendKeyEvent(KeyEvent event) {
-        /*
-         * This handles the keycodes from soft keyboard (and IME-translated
-         * input from hardkeyboard)
-         */
-        int keyCode = event.getKeyCode();
-        if (event.getAction() == KeyEvent.ACTION_DOWN) {
-            if (event.isPrintingKey()) {
-                commitText(String.valueOf((char) event.getUnicodeChar()), 1);
-                KR2Activity.nativeCharInput(keyCode);
-            } else if(keyCode == KeyEvent.KEYCODE_DEL) {
-            	KR2Activity.nativeKeyAction(keyCode, true);
-            }
-            return true;
-        } else if (event.getAction() == KeyEvent.ACTION_UP) {
-        	if(keyCode == KeyEvent.KEYCODE_DEL) {
-            	KR2Activity.nativeKeyAction(keyCode, false);
-            }
-        	//KR2Activity.nativeKeyAction(keyCode, false);
-            return true;
-        }
-        return super.sendKeyEvent(event);
-    }
-
-    @Override
-    public boolean commitText(CharSequence text, int newCursorPosition) {
-
-    	KR2Activity.nativeCommitText(text.toString(), newCursorPosition);
-
-        return super.commitText(text, newCursorPosition);
-    }
-
-    @Override
-    public boolean setComposingText(CharSequence text, int newCursorPosition) {
-
-        //nativeSetComposingText(text.toString(), newCursorPosition);
-
-        return super.setComposingText(text, newCursorPosition);
-    }
-
-    //public native void nativeSetComposingText(String text, int newCursorPosition);
-
-    @Override
-    public boolean deleteSurroundingText(int beforeLength, int afterLength) {       
-        // Workaround to capture backspace key. Ref: http://stackoverflow.com/questions/14560344/android-backspace-in-webview-baseinputconnection
-        if (beforeLength == 1 && afterLength == 0) {
-            // backspace
-            return super.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL))
-                && super.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL));
-        }
-
-        return super.deleteSurroundingText(beforeLength, afterLength);
-    }
-}
-
 @SuppressWarnings("ALL")
-public class KR2Activity extends Cocos2dxActivity implements ActivityCompat.OnRequestPermissionsResultCallback {
+public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequestPermissionsResultCallback {
+
+    @Override
+    protected String[] getLibraries() {
+        return new String[] { "krkr2yuri" };
+    }
 
     public static final int RC_WRITE_EXTERNAL = 1;
     public static final int RC_PHONE_STATE = 2;
@@ -306,6 +192,8 @@ public class KR2Activity extends Cocos2dxActivity implements ActivityCompat.OnRe
 		sInstance = this;
         Sp = PreferenceManager.getDefaultSharedPreferences(this);
 		super.onCreate(savedInstanceState);
+		nativeInitJNI();
+		doSetSystemUiVisibility();
 	
 		if (Build.VERSION.SDK_INT>=Build.VERSION_CODES.LOLLIPOP) {
 			for(String path : getExtSdCardPaths(this)) {
@@ -320,6 +208,26 @@ public class KR2Activity extends Cocos2dxActivity implements ActivityCompat.OnRe
         }
 		initDump(this.getFilesDir().getAbsolutePath() + "/dump");
 
+		// Extract bundled DroidSansFallback.ttf from APK assets to internal storage
+		// so the native font system can find it (SDL variant: storage system doesn't
+		// handle absolute paths, so we make it available as a regular file).
+		try {
+			java.io.InputStream is = getAssets().open("DroidSansFallback.ttf");
+			if (is != null) {
+				java.io.File dst = new java.io.File(getFilesDir(), "DroidSansFallback.ttf");
+				if (!dst.exists()) {
+					java.io.FileOutputStream os = new java.io.FileOutputStream(dst);
+					byte[] buf = new byte[65536];
+					int n;
+					while ((n = is.read(buf)) > 0) os.write(buf, 0, n);
+					os.close();
+				}
+				is.close();
+			}
+		} catch (java.io.IOException e) {
+			// Font file not found or copy failed; system font fallback will handle it
+		}
+
 		// Forward launch intent extras to the engine. Recognized extras:
 		//   "startupPath" : String  -> path to a .xp3 archive or a bootable folder
 		//   "args"        : String[] -> per-game options, each "-key=value" or "-flag"
@@ -333,17 +241,15 @@ public class KR2Activity extends Cocos2dxActivity implements ActivityCompat.OnRe
 				nativeSetStartupArgs(startupPath, args);
 			}
 		}
+
+		// Floating game menu overlay (draggable button + popup menu)
+		GameMenuOverlay.attach(this);
 	}
 	
 	@Override
 	public void onDestroy() {
+		// SDLActivity.onDestroy handles cleanup + waits for SDL thread to finish
 		super.onDestroy();
-		System.exit(0);
-	}
-	
-	@Override
-	public void onLowMemory() {
-		nativeOnLowMemory();
 	}
 	
 	static class DialogMessage
@@ -371,12 +277,12 @@ public class KR2Activity extends Cocos2dxActivity implements ActivityCompat.OnRe
         	onMessageBoxOK(n);
 		}
 		
-		public AlertDialog.Builder CreateBuilder() {
+		public MaterialAlertDialogBuilder CreateBuilder() {
 		/*	TextView showText = new TextView(sInstance);
 			showText.setText(Text);
 			if (Build.VERSION.SDK_INT>=Build.VERSION_CODES.HONEYCOMB)
 				showText.setTextIsSelectable(true);*/
-			AlertDialog.Builder builder = new AlertDialog.Builder(sInstance).
+			MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(sInstance).
                 setTitle(Title).
                 setMessage(Text).
                 //setView(showText).
@@ -414,7 +320,7 @@ public class KR2Activity extends Cocos2dxActivity implements ActivityCompat.OnRe
 		}
 		
 		public void ShowInputBox(final String text) {
-			AlertDialog.Builder builder = CreateBuilder();
+			MaterialAlertDialogBuilder builder = CreateBuilder();
 			TextEditor = new EditText(sInstance);  
 			LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
 			                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -431,7 +337,6 @@ public class KR2Activity extends Cocos2dxActivity implements ActivityCompat.OnRe
 	}
 	static DialogMessage mDialogMessage = new DialogMessage();
 
-    protected static View mTextEdit = null;
     SharedPreferences Sp;
 	
 	static Handler msgHandler = new Handler() {
@@ -464,61 +369,32 @@ public class KR2Activity extends Cocos2dxActivity implements ActivityCompat.OnRe
 			}
 		});
 	}
-	
-    static class ShowTextInputTask implements Runnable {
-        /*
-         * This is used to regulate the pan&scan method to have some offset from
-         * the bottom edge of the input region and the top edge of an input
-         * method (soft keyboard)
-         */
-        static final int HEIGHT_PADDING = 15;
 
-        public int x, y, w, h;
-
-        public ShowTextInputTask(int x, int y, int w, int h) {
-            this.x = x;
-            this.y = y;
-            this.w = w;
-            this.h = h;
-        }
-
-		@Override
-        public void run() {
-			FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(w, h + HEIGHT_PADDING);
-			params.leftMargin = x;
-			params.topMargin = y;
-
-            if (mTextEdit == null) {
-                mTextEdit = new DummyEdit(getContext());
-
-                sInstance.mFrameLayout.addView(mTextEdit, params);
-            } else {
-                mTextEdit.setLayoutParams(params);
-            }
-
-            mTextEdit.setVisibility(View.VISIBLE);
-            mTextEdit.requestFocus();
-
-            InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
-            imm.showSoftInput(mTextEdit, 0);
-        }
-    }
-    
-	static public void showTextInput(int x, int y, int w, int h) {
-		msgHandler.post(new ShowTextInputTask(x, y, w, h));
-	}
-	static public void hideTextInput() {
+	static public void ShowMenuDialog(final String[] captions, final boolean[] hasSub) {
 		msgHandler.post(new Runnable() {
 			@Override
 			public void run() {
-		        if (mTextEdit != null) {
-		            mTextEdit.setVisibility(View.GONE);
-		            InputMethodManager imm = (InputMethodManager) sInstance.getSystemService(Context.INPUT_METHOD_SERVICE);
-		            imm.hideSoftInputFromWindow(mTextEdit.getWindowToken(), 0);
-		        }
+				AlertDialog.Builder builder = new AlertDialog.Builder(sInstance);
+				builder.setTitle("Game Menu");
+				builder.setItems(captions, new DialogInterface.OnClickListener() {
+					@Override
+					public void onClick(DialogInterface dialog, int which) {
+						dialog.dismiss();
+						nativeOnMenuResult(which);
+					}
+				});
+				builder.setOnCancelListener(new DialogInterface.OnCancelListener() {
+					@Override
+					public void onCancel(DialogInterface dialog) {
+						nativeOnMenuResult(-1);
+					}
+				});
+				builder.show();
 			}
 		});
 	}
+	
+	
 	
 	static private native void onMessageBoxOK(int nButton);
 	static private native void onMessageBoxText(String text);
@@ -526,7 +402,13 @@ public class KR2Activity extends Cocos2dxActivity implements ActivityCompat.OnRe
 	static public native void onNativeInit();
 	static public native void onBannerSizeChanged(int w, int h);
 	static private native void initDump(String path);
-	static private native void nativeOnLowMemory();
+	static private native void nativeShowGameMenu();
+	static private native void nativeToggleMouseMode();
+	static private native void nativeShowKeyboard();
+	static private native void nativeGameMenuExit();
+	static private native boolean nativeIsFullscreenStretch();
+	static private native void nativeToggleAspectRatio();
+	static private native void nativeOnMenuResult(int index);
 	
 	static public void MessageController(int what, int arg1, int arg2) {
         Message msg = msgHandler.obtainMessage();
@@ -598,189 +480,7 @@ public class KR2Activity extends Cocos2dxActivity implements ActivityCompat.OnRe
 		return ret;
     }
     
-    private static native void nativeTouchesBegin(final int id, final float x, final float y);
-    private static native void nativeTouchesEnd(final int id, final float x, final float y);
-    private static native void nativeTouchesMove(final int[] ids, final float[] xs, final float[] ys);
-    private static native void nativeTouchesCancel(final int[] ids, final float[] xs, final float[] ys);
-    public static native boolean nativeKeyAction(final int keyCode, final boolean isPress);
-    public static native void nativeCharInput(final int keyCode);
-    public static native void nativeCommitText(String text, int newCursorPosition);
-    
-    private static native void nativeInsertText(final String text);
-    public static native void nativeDeleteBackward();
-    private static native String nativeGetContentText();
-    private static native void nativeHoverMoved(final float x, final float y);
-    private static native void nativeMouseScrolled(final float scroll);
-    
-    class KR2GLSurfaceView extends Cocos2dxGLSurfaceView {
-
-        public KR2GLSurfaceView(final Context context) {
-            super(context);
-        }
-
-        public KR2GLSurfaceView(final Context context, final AttributeSet attrs) {
-            super(context, attrs);
-        }
-        
-        @Override
-        public void insertText(final String pText) {
-        	nativeInsertText(pText);
-        }
-
-        @Override
-        public void deleteBackward() {
-        	nativeDeleteBackward();
-        }
-
-        @Override
-        public boolean onKeyDown(final int pKeyCode, final KeyEvent pKeyEvent) {
-            switch (pKeyCode) {
-                case KeyEvent.KEYCODE_BACK:
-                case KeyEvent.KEYCODE_MENU:
-                case KeyEvent.KEYCODE_DPAD_LEFT:
-                case KeyEvent.KEYCODE_DPAD_RIGHT:
-                case KeyEvent.KEYCODE_DPAD_UP:
-                case KeyEvent.KEYCODE_DPAD_DOWN:
-                case KeyEvent.KEYCODE_ENTER:
-                case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
-                case KeyEvent.KEYCODE_DPAD_CENTER:
-                	nativeKeyAction(pKeyCode, true);
-                    return true;
-                default:
-                    return super.onKeyDown(pKeyCode, pKeyEvent);
-            }
-        }
-
-        @Override
-        public boolean onKeyUp(final int pKeyCode, final KeyEvent pKeyEvent) {
-            switch (pKeyCode) {
-                case KeyEvent.KEYCODE_BACK:
-                case KeyEvent.KEYCODE_MENU:
-                case KeyEvent.KEYCODE_DPAD_LEFT:
-                case KeyEvent.KEYCODE_DPAD_RIGHT:
-                case KeyEvent.KEYCODE_DPAD_UP:
-                case KeyEvent.KEYCODE_DPAD_DOWN:
-                case KeyEvent.KEYCODE_ENTER:
-                case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
-                case KeyEvent.KEYCODE_DPAD_CENTER:
-                	nativeKeyAction(pKeyCode, false);
-                    return true;
-                default:
-                    return super.onKeyUp(pKeyCode, pKeyEvent);
-            }
-        }
-        
-        @Override
-        public boolean onHoverEvent(final MotionEvent pMotionEvent) {
-            final int pointerNumber = pMotionEvent.getPointerCount();
-            final float[] xs = new float[pointerNumber];
-            final float[] ys = new float[pointerNumber];
-            for (int i = 0; i < pointerNumber; i++) {
-                xs[i] = pMotionEvent.getX(i);
-                ys[i] = pMotionEvent.getY(i);
-            }
-            
-        	switch(pMotionEvent.getActionMasked()) {
-        	case MotionEvent.ACTION_HOVER_MOVE:
-        		nativeHoverMoved(xs[0], ys[0]);
-        		break;
-        	}
-        	return true;
-        }
-        
-        @Override
-        public boolean onTouchEvent(final MotionEvent pMotionEvent) {
-        	
-            // these data are used in ACTION_MOVE and ACTION_CANCEL
-            final int pointerNumber = pMotionEvent.getPointerCount();
-            final int[] ids = new int[pointerNumber];
-            final float[] xs = new float[pointerNumber];
-            final float[] ys = new float[pointerNumber];
-
-            for (int i = 0; i < pointerNumber; i++) {
-                ids[i] = pMotionEvent.getPointerId(i);
-                xs[i] = pMotionEvent.getX(i);
-                ys[i] = pMotionEvent.getY(i);
-            }
-
-            switch (pMotionEvent.getAction() & MotionEvent.ACTION_MASK) {
-                case MotionEvent.ACTION_POINTER_DOWN:
-                    final int indexPointerDown = pMotionEvent.getAction() >> MotionEvent.ACTION_POINTER_INDEX_SHIFT;
-                    final int idPointerDown = pMotionEvent.getPointerId(indexPointerDown);
-                    final float xPointerDown = pMotionEvent.getX(indexPointerDown);
-                    final float yPointerDown = pMotionEvent.getY(indexPointerDown);
-                    nativeTouchesBegin(idPointerDown, xPointerDown, yPointerDown);
-                    break;
-
-                case MotionEvent.ACTION_DOWN:
-                    // there are only one finger on the screen
-                    final int idDown = pMotionEvent.getPointerId(0);
-                    final float xDown = xs[0];
-                    final float yDown = ys[0];
-                    nativeTouchesBegin(idDown, xDown, yDown);
-                    break;
-
-                case MotionEvent.ACTION_MOVE:
-                	nativeTouchesMove(ids, xs, ys);
-                    break;
-
-                case MotionEvent.ACTION_POINTER_UP:
-                    final int indexPointUp = pMotionEvent.getAction() >> MotionEvent.ACTION_POINTER_INDEX_SHIFT;
-                    final int idPointerUp = pMotionEvent.getPointerId(indexPointUp);
-                    final float xPointerUp = pMotionEvent.getX(indexPointUp);
-                    final float yPointerUp = pMotionEvent.getY(indexPointUp);
-                    nativeTouchesEnd(idPointerUp, xPointerUp, yPointerUp);
-                    break;
-
-                case MotionEvent.ACTION_UP:
-                    // there are only one finger on the screen
-                    final int idUp = pMotionEvent.getPointerId(0);
-                    final float xUp = xs[0];
-                    final float yUp = ys[0];
-                    nativeTouchesEnd(idUp, xUp, yUp);
-                    break;
-
-                case MotionEvent.ACTION_CANCEL:
-                	nativeTouchesCancel(ids, xs, ys);
-                    break;
-            }
-
-            /*
-            if (BuildConfig.DEBUG) {
-                Cocos2dxGLSurfaceView.dumpMotionEvent(pMotionEvent);
-            }
-            */
-            return true;
-        }
-        
-		@TargetApi(Build.VERSION_CODES.HONEYCOMB_MR1) @Override  
-        public boolean onGenericMotionEvent(MotionEvent event) {
-        	switch (event.getActionMasked()) {
-	        case MotionEvent.ACTION_SCROLL:
-	        	float v = event.getAxisValue(MotionEvent.AXIS_VSCROLL);
-	        	nativeMouseScrolled(-v);
-                return true;
-            default:
-            	break;
-        	}
-        	return super.onGenericMotionEvent(event);
-        }
-    }
-    
-    //@Override
-    // ## fix private function
-//    public Cocos2dxGLSurfaceView onCreateView() {
-//        Cocos2dxGLSurfaceView glSurfaceView = new KR2GLSurfaceView(this);
-//    	hideSystemUI();
-//
-//        // this line is need on some device if we specify an alpha bits
-//        if(this.mGLContextAttrs[3] > 0) glSurfaceView.getHolder().setFormat(PixelFormat.TRANSLUCENT);
-//
-//        Cocos2dxEGLConfigChooser chooser = new Cocos2dxEGLConfigChooser(this.mGLContextAttrs);
-//        glSurfaceView.setEGLConfigChooser(chooser);
-//
-//        return glSurfaceView;
-//    }
+    private static native void nativeInitJNI();
     
     public int get_res_sd_operate_step() { return -1; }
 
@@ -793,7 +493,7 @@ public class KR2Activity extends Cocos2dxActivity implements ActivityCompat.OnRe
 		});
     }
     static void guideDialogForLEXA(final String path) {
-    	AlertDialog.Builder builder = new AlertDialog.Builder(sInstance);
+    	MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(sInstance);
     	ImageView image = new ImageView(sInstance);
     	image.setImageResource(sInstance.get_res_sd_operate_step());
     	builder
@@ -1179,7 +879,10 @@ public class KR2Activity extends Cocos2dxActivity implements ActivityCompat.OnRe
             DocumentFile document = getDocumentFile(file, true,sInstance);
             // getDocumentFile implicitly creates the directory.
 
-            return document.exists();
+            if (document != null)
+                return document.exists();
+            else
+                return false;
         }
         
         // Try the Kitkat workaround.
@@ -1215,16 +918,114 @@ public class KR2Activity extends Cocos2dxActivity implements ActivityCompat.OnRe
 		getWindow().getDecorView().setSystemUiVisibility(uiOpts);
     }
 
+    //--------------------------------------------------------------------------
+    // Debug overlay (FPS/memory) — Android native TextView on top of SDL surface
+    //--------------------------------------------------------------------------
+    private static TextView mDebugOverlay = null;
+    private static boolean mDebugOverlayVisible = false;
+
+    public static void showDebugOverlay(final boolean show) {
+        if (show == mDebugOverlayVisible) return;
+        mDebugOverlayVisible = show;
+        msgHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (show && mDebugOverlay == null) {
+                    mDebugOverlay = new TextView(sInstance);
+                    mDebugOverlay.setTextColor(Color.argb(220, 255, 255, 255));
+                    mDebugOverlay.setTextSize(12);
+                    mDebugOverlay.setShadowLayer(2, 1, 1, Color.argb(200, 0, 0, 0));
+                    mDebugOverlay.setPadding(12, 12, 12, 12);
+                    mDebugOverlay.setVisibility(View.GONE);
+                    FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT);
+                    lp.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
+                    mDebugOverlay.setLayoutParams(lp);
+                    sInstance.mLayout.addView(mDebugOverlay);
+                }
+                if (mDebugOverlay != null) {
+                    mDebugOverlay.setVisibility(show ? View.VISIBLE : View.GONE);
+                }
+            }
+        });
+    }
+
+    public static void updateDebugOverlay(final String text) {
+        if (!mDebugOverlayVisible || mDebugOverlay == null) return;
+        msgHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (mDebugOverlay != null)
+                    mDebugOverlay.setText(text);
+            }
+        });
+    }
+
     private static native boolean nativeGetHideSystemButton();
     private static native void nativeSetSafTreeUri(String uri);
     private static native String nativeGetSafTreeUri();
     private static native void nativeSetStartupArgs(String startupPath, String[] args);
     void hideSystemUI() {
-    	if(nativeGetHideSystemButton() && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
+    	if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
     		doSetSystemUiVisibility();
     	}
     }
     
+    static public String getExternalStoragePath() {
+    	Activity ctx = getContext();
+    	if (ctx == null) return "";
+    	java.io.File extDir = ctx.getExternalFilesDir(null);
+    	return extDir != null ? extDir.getAbsolutePath() : "";
+    }
+
+    static public String getInternalStoragePath() {
+    	Activity ctx = getContext();
+    	if (ctx == null) return "";
+    	java.io.File intDir = ctx.getFilesDir();
+    	return intDir != null ? intDir.getAbsolutePath() : "";
+    }
+
+    static public String getDriverPath() {
+    	Activity ctx = getContext();
+    	if (!(ctx instanceof KR2Activity)) return "";
+    	StringBuilder sb = new StringBuilder();
+    	String[] paths = ((KR2Activity)ctx).getStoragePath();
+    	if (paths != null) {
+    		for (String p : paths) {
+    			if (p != null) sb.append(p).append(";");
+    		}
+    	}
+    	return sb.toString();
+    }
+
+    static public String getApkStoragePath() {
+    	Activity ctx = getContext();
+    	return ctx != null ? ctx.getPackageCodePath() : "";
+    }
+
+    static public String getPackageVersionString() {
+    	Activity ctx = getContext();
+    	if (ctx == null) return "";
+    	try {
+    		return ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0).versionName;
+    	} catch (Exception e) {
+    		return "";
+    	}
+    }
+
+    static public boolean createFolders(String path) {
+    	java.io.File dir = new java.io.File(path);
+    	if (dir.isDirectory()) return true;
+    	return dir.mkdirs();
+    }
+
+    static public boolean renameFile(String oldPath, String newPath) {
+    	java.io.File oldFile = new java.io.File(oldPath);
+    	java.io.File newFile = new java.io.File(newPath);
+    	return oldFile.renameTo(newFile);
+    }
+
     static public String getLocaleName() {
     	Locale defloc = Locale.getDefault();
     	String lang = defloc.getLanguage();
@@ -1237,7 +1038,13 @@ public class KR2Activity extends Cocos2dxActivity implements ActivityCompat.OnRe
     }
     
     static public void exit() {
-    	System.exit(0);
+    	msgHandler.post(new Runnable() {
+			@Override
+			public void run() {
+				Activity act = sInstance;
+				if (act != null) act.finish();
+			}
+		});
     }
     
     static final int ORIENT_VERTICAL = 1;
@@ -1289,4 +1096,111 @@ public class KR2Activity extends Cocos2dxActivity implements ActivityCompat.OnRe
         }
     }
 
+    //--------------------------------------------------------------------------
+    // GameMenuOverlay — draggable floating button + popup menu
+    //--------------------------------------------------------------------------
+    static class GameMenuOverlay {
+        static final int ITEM_GAME_MENU = 0;
+        static final int ITEM_WINDOW = 1;
+        static final int ITEM_MOUSE_MODE = 2;
+        static final int ITEM_KEYBOARD = 3;
+        static final int ITEM_EXIT = 4;
+        private View mButton;
+        private float mOffsetX, mOffsetY;
+        private boolean mMouseMode = true;
+
+        static GameMenuOverlay attach(KR2Activity activity) {
+            GameMenuOverlay overlay = new GameMenuOverlay();
+            overlay.create(activity);
+            overlay.show();
+            return overlay;
+        }
+
+        void create(KR2Activity activity) {
+            float density = activity.getResources().getDisplayMetrics().density;
+            int btnSize = (int)(48 * density + 0.5f);
+
+            mButton = new View(activity) {
+                @Override
+                protected void onDraw(Canvas canvas) {
+                    super.onDraw(canvas);
+                    int cx = getWidth() / 2, cy = getHeight() / 2, r = cx - 4;
+                    Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    p.setColor(Color.argb(180, 64, 64, 64));
+                    canvas.drawCircle(cx, cy, r, p);
+                    p.setColor(Color.argb(220, 255, 255, 255));
+                    p.setStrokeWidth(3);
+                    float bw = r * 0.55f;
+                    for (int i = -1; i <= 1; i++)
+                        canvas.drawLine(cx - bw, cy + i * 7, cx + bw, cy + i * 7, p);
+                }
+            };
+            mButton.setVisibility(View.GONE);
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(btnSize, btnSize);
+            lp.gravity = android.view.Gravity.BOTTOM | android.view.Gravity.START;
+            lp.bottomMargin = (int)(100 * density + 0.5f);
+            lp.leftMargin = (int)(16 * density + 0.5f);
+            mButton.setLayoutParams(lp);
+
+            mButton.setOnTouchListener((v, event) -> {
+                switch (event.getActionMasked()) {
+                case android.view.MotionEvent.ACTION_DOWN:
+                    mOffsetX = event.getRawX() - v.getX();
+                    mOffsetY = event.getRawY() - v.getY();
+                    return true;
+                case android.view.MotionEvent.ACTION_MOVE:
+                    v.setX(event.getRawX() - mOffsetX);
+                    v.setY(event.getRawY() - mOffsetY);
+                    return true;
+                case android.view.MotionEvent.ACTION_UP: {
+                    float dx = event.getRawX() - (v.getX() + mOffsetX);
+                    float dy = event.getRawY() - (v.getY() + mOffsetY);
+                    if (Math.sqrt(dx*dx + dy*dy) < 20)
+                        showMenu(activity, v);
+                    return true;
+                }
+                }
+                return false;
+            });
+
+            activity.mLayout.addView(mButton);
+        }
+
+		void showMenu(KR2Activity activity, View anchor) {
+			// Popup inherits activity theme (DayNight), follows system dark/light mode
+            PopupMenu popup = new PopupMenu(activity, anchor);
+            popup.getMenu().add(0, ITEM_GAME_MENU, 0, "Game Menu");
+            popup.getMenu().add(0, ITEM_WINDOW, 0,
+                nativeIsFullscreenStretch() ? "Window (Stretch)" : "Window (Aspect)");
+            popup.getMenu().add(0, ITEM_MOUSE_MODE, 0,
+                mMouseMode ? "Switch to Touch" : "Switch to Mouse");
+            popup.getMenu().add(0, ITEM_KEYBOARD, 0, "Keyboard");
+            popup.getMenu().add(0, ITEM_EXIT, 0, "Exit");
+            popup.setOnMenuItemClickListener(item -> {
+                switch (item.getItemId()) {
+                case ITEM_GAME_MENU:
+                    nativeShowGameMenu();
+                    break;
+                case ITEM_WINDOW:
+                    nativeToggleAspectRatio();
+                    break;
+                case ITEM_MOUSE_MODE:
+                    mMouseMode = !mMouseMode;
+                    nativeToggleMouseMode();
+                    break;
+                case ITEM_KEYBOARD:
+                    nativeShowKeyboard();
+                    break;
+                case ITEM_EXIT:
+                    nativeGameMenuExit();
+                    break;
+                }
+                return true;
+            });
+            popup.show();
+        }
+
+        void show() { if (mButton != null) mButton.setVisibility(View.VISIBLE); }
+        void hide() { if (mButton != null) mButton.setVisibility(View.GONE); }
+    }
 }

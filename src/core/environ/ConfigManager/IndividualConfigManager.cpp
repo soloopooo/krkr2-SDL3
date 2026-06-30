@@ -1,5 +1,9 @@
 #include "IndividualConfigManager.h"
+#ifdef KRKR2_SDL_BUILD
+#include <sys/stat.h>
+#else
 #include "platform/CCFileUtils.h"
+#endif
 #include "LocaleConfigManager.h"
 #include "Platform.h"
 
@@ -24,7 +28,12 @@ void IndividualConfigManager::Clear()
 
 bool IndividualConfigManager::CheckExistAt(const std::string &folder) {
 	std::string fullpath = folder + "/" FILENAME;
+#ifdef KRKR2_SDL_BUILD
+	struct stat st;
+	return stat(fullpath.c_str(), &st) == 0;
+#else
 	return cocos2d::FileUtils::getInstance()->isFileExist(fullpath);
+#endif
 }
 
 bool IndividualConfigManager::CreatePreferenceAt(const std::string &folder) {
@@ -51,7 +60,12 @@ bool IndividualConfigManager::UsePreferenceAt(const std::string &folder)
 	std::string fullpath = folder + "/" FILENAME;
 	if (CurrentPath == fullpath) return true;
 	Clear();
+#ifdef KRKR2_SDL_BUILD
+	struct stat st;
+	if (stat(fullpath.c_str(), &st) != 0) return false;
+#else
 	if (!cocos2d::FileUtils::getInstance()->isFileExist(fullpath)) return false;
+#endif
 	CurrentPath = fullpath;
 	Initialize();
 	return true;

@@ -32,7 +32,7 @@ add_static_library(avcodec "")
 add_static_library(swscale "")
 add_static_library(swresample "")
 add_static_library(onig "")
-add_static_library(sdl2 libSDL2.a)
+add_static_library(sdl3 libSDL3.a)
 
 # search kr2core src
 file(GLOB KRKR2CORE_CODE
@@ -41,10 +41,7 @@ file(GLOB KRKR2CORE_CODE
     ${KRKR2CORE_PATH}/base/win32/*.cpp
     ${KRKR2CORE_PATH}/environ/*.cpp
     ${KRKR2CORE_PATH}/environ/ConfigManager/*.cpp
-    ${KRKR2CORE_PATH}/environ/cocos2d/*.cpp
     ${KRKR2CORE_PATH}/environ/linux/*.cpp
-    ${KRKR2CORE_PATH}/environ/ui/*.cpp
-    ${KRKR2CORE_PATH}/environ/ui/extension/*.cpp
     ${KRKR2CORE_PATH}/environ/win32/SystemControl.cpp 
     ${KRKR2CORE_PATH}/extension/*.cpp
     ${KRKR2CORE_PATH}/movie/*.cpp
@@ -63,8 +60,38 @@ file(GLOB KRKR2CORE_CODE
     ${KRKR2CORE_PATH}/utils/win32/*.cpp
     ${KRKR2CORE_PATH}/visual/gl/*.cpp
     ${KRKR2CORE_PATH}/visual/ogl/*.cpp
+    ${KRKR2CORE_PATH}/visual/gpu/*.cpp
     ${KRKR2CORE_PATH}/visual/win32/*.cpp
 )
+
+if(KRKR2_USE_COCOS2D)
+    file(GLOB KRKR2CORE_COCOS2D
+        ${KRKR2CORE_PATH}/environ/cocos2d/*.cpp
+        ${KRKR2CORE_PATH}/environ/ui/*.cpp
+        ${KRKR2CORE_PATH}/environ/ui/extension/*.cpp
+        ${KRKR2CORE_PATH}/environ/sdl/*.cpp
+    )
+    list(APPEND KRKR2CORE_CODE ${KRKR2CORE_COCOS2D})
+    # SDL-only utils not needed
+    set(KRKR2CORE_SDL_REMOVE
+        ${KRKR2CORE_PATH}/environ/android/AndroidUtils_sdl.cpp
+        ${KRKR2CORE_PATH}/environ/sdl/WindowLayer_sdl.cpp)
+else()
+    file(GLOB KRKR2CORE_SDL
+        ${KRKR2CORE_PATH}/environ/sdl/*.cpp
+    )
+    list(APPEND KRKR2CORE_CODE ${KRKR2CORE_SDL})
+    # SDL2 provides its own platform implementations
+    set(KRKR2CORE_SDL_REMOVE
+        ${KRKR2CORE_PATH}/environ/android/AndroidUtils.cpp
+        ${KRKR2CORE_PATH}/environ/win32/Platform.cpp
+        ${KRKR2CORE_PATH}/environ/linux/Platform.cpp
+        ${KRKR2CORE_PATH}/visual/LoadPVRv3.cpp
+        ${KRKR2CORE_PATH}/visual/ogl/RenderManager_ogl.cpp
+        ${KRKR2CORE_PATH}/movie/ffmpeg/KRMovieLayer.cpp
+        ${KRKR2CORE_PATH}/movie/ffmpeg/krffmpeg.cpp)
+    add_compile_definitions(KRKR2_SDL_BUILD KRKR2_USE_VULKAN)
+endif()
 
 file(GLOB KRKR2CORE_CODEANDROID
     ${KRKR2CORE_PATH}/environ/android/*.cpp
@@ -93,6 +120,12 @@ list(REMOVE_ITEM KRKR2CORE_CODE
 
 if(CMAKE_SYSTEM_NAME MATCHES "Android")
     list(APPEND KRKR2CORE_CODE ${KRKR2CORE_CODEANDROID})
+    list(REMOVE_ITEM KRKR2CORE_CODE ${KRKR2CORE_SDL_REMOVE})
+    if(NOT KRKR2_USE_COCOS2D)
+        # Compile tinyxml2 directly (cocos2d-x build provides it as ext_tinyxml2)
+        list(APPEND KRKR2CORE_CODE
+            ${COCOS2DX_PATH}/external/tinyxml2/tinyxml2.cpp)
+    endif()
     set(PLATFORM android)
 elseif(CMAKE_SYSTEM_NAME MATCHES "Linux")
     set(PLATFORM linux)
@@ -125,8 +158,21 @@ target_include_directories(${PROJECT_NAME} PUBLIC
     ${KRKR2CORE_PATH}/base/win32 
     ${KRKR2CORE_PATH}/environ 
     ${KRKR2CORE_PATH}/environ/win32 
-    ${KRKR2CORE_PATH}/environ/android 
-    ${KRKR2CORE_PATH}/environ/sdl 
+    ${KRKR2CORE_PATH}/environ/android
+    ${KRKR2CORE_PATH}/environ/sdl
+
+    # Third-party library headers bundled in cocos2d-x's external/ directory.
+    # These are NOT cocos2d-x code — they are independent libs (tinyxml2, zlib,
+    # libpng, libwebp, freetype) that the port build system compiled into .a
+    # but did not install headers for.
+    ${COCOS2DX_PATH}/external
+    ${COCOS2DX_PATH}/external/tinyxml2
+    ${COCOS2DX_PATH}/external/unzip
+    ${COCOS2DX_PATH}/external/png/include/${PLATFORM}
+    ${COCOS2DX_PATH}/external/webp/include/${PLATFORM}
+    ${COCOS2DX_PATH}/external/freetype2/include/${PLATFORM}
+    ${COCOS2DX_PATH}/external/freetype2/include/${PLATFORM}/freetype2
+
     ${KRKR2CORE_PATH}/msg 
     ${KRKR2CORE_PATH}/msg/win32 
     ${KRKR2CORE_PATH}/extension
@@ -141,19 +187,22 @@ target_include_directories(${PROJECT_NAME} PUBLIC
     ${KRKR2CORE_PATH}/visual/RenderScript/rs
     ${KRKR2CORE_PATH}/../plugins
 
-    ${COCOS2DX_PATH}
-    ${COCOS2DX_PATH}/cocos
-    ${COCOS2DX_PATH}/cocos/scripting
-    ${COCOS2DX_PATH}/cocos/editor-support
-    ${COCOS2DX_PATH}/extensions
-    ${COCOS2DX_PATH}/external
-    ${COCOS2DX_PATH}/external/png/include/${PLATFORM}
-    ${COCOS2DX_PATH}/external/webp/include/${PLATFORM}
-    ${COCOS2DX_PATH}/external/freetype2/include/${PLATFORM}
-    ${COCOS2DX_PATH}/external/freetype2/include/${PLATFORM}/freetype2
-
     ${PORTBUILD_PATH}/include
+
 )
+
+if(KRKR2_USE_COCOS2D)
+    target_include_directories(${PROJECT_NAME} PUBLIC
+        ${COCOS2DX_PATH}
+        ${COCOS2DX_PATH}/cocos/scripting
+        ${COCOS2DX_PATH}/cocos/editor-support
+        ${COCOS2DX_PATH}/extensions
+        ${COCOS2DX_PATH}/external
+        ${KRKR2CORE_PATH}/environ/cocos2d
+        ${KRKR2CORE_PATH}/environ/ui
+        ${KRKR2CORE_PATH}/environ/ui/extension
+    )
+endif()
 
 target_compile_definitions(${PROJECT_NAME} PUBLIC
     -DTJS_TEXT_OUT_CRLF -D__STDC_CONSTANT_MACROS -DUSE_UNICODE_FSTRING
@@ -204,24 +253,19 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
     breakpad_client
     
     # framework
-    sdl2_static
-    cocos2d
-    ext_unzip
-    ext_tinyxml2
-    ext_xxhash
-    ext_edtaa3func
-    ext_poly2tri
-    ext_recast
-    ext_clipper
-    ext_convertUTF
-    ext_pvmp3dec
-    chipmunk
-    BulletCollision
-    BulletDynamics
-    BulletMultiThreaded
-    LinearMath
-    MiniCL
+    sdl3_static
+)
 
+if(KRKR2_USE_COCOS2D)
+    target_link_libraries(${PROJECT_NAME} PUBLIC
+        cocos2d
+        ext_unzip ext_tinyxml2 ext_xxhash ext_edtaa3func
+        ext_poly2tri ext_recast ext_clipper ext_convertUTF ext_pvmp3dec
+        chipmunk BulletCollision BulletDynamics BulletMultiThreaded LinearMath MiniCL
+    )
+endif()
+
+target_link_libraries(${PROJECT_NAME} PUBLIC
     z
     png
     webp

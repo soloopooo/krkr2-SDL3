@@ -95,7 +95,7 @@ jobs:
       uses: android-actions/setup-android@v3
       with:
         cmdline-tools-version: 9477386
-        packages: build-tools;33.0.2 platforms;android-33 ndk;25.2.9519653
+        packages: build-tools;33.0.2 platforms;android-33 ndk;29.0.14206865
 
     - name: Install p7zip
       run: |

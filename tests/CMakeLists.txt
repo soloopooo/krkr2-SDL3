@@ -15,6 +15,28 @@ include(GoogleTest)
 
 set(SRC_ROOT ${CMAKE_SOURCE_DIR}/src)
 
+# --- MathAlgorithms (signal deinterleave + window) ---------------------------
+add_executable(test_math_algorithms
+	test_math_algorithms.cpp
+	${SRC_ROOT}/core/utils/MathAlgorithms_Default.cpp
+)
+target_link_libraries(test_math_algorithms PRIVATE gtest_main)
+gtest_discover_tests(test_math_algorithms)
+
+# --- CharacterSet (UTF-8 <-> UTF-16 round-trip) ------------------------------
+add_executable(test_character_set
+	test_character_set.cpp
+)
+target_include_directories(test_character_set PRIVATE
+	${CMAKE_CURRENT_SOURCE_DIR}/stubs      # override MsgIntf.h with stub
+	${SRC_ROOT}/core
+	${SRC_ROOT}/core/base
+	${SRC_ROOT}/core/tjs2
+	${SRC_ROOT}/core/utils
+)
+target_link_libraries(test_character_set PRIVATE gtest_main)
+gtest_discover_tests(test_character_set)
+
 # --- MD5 (RFC 1321 known-answer vectors) -------------------------------------
 # src/core/utils/md5.c is a standalone C translation unit (no engine deps).
 add_executable(test_md5

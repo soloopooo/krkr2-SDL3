@@ -1,3 +1,6 @@
+#ifdef KRKR2_SDL_BUILD
+// KRMoviePlayer depends heavily on cocos2d-x rendering; skipped in SDL2 variant.
+#else
 #include <thread>
 extern "C" {
 #include "libswscale/swscale.h"
@@ -10,7 +13,9 @@ extern "C" {
 #include "WaveMixer.h"
 #include "WindowImpl.h"
 #include "VideoOvlImpl.h"
+#ifndef KRKR2_SDL_BUILD
 #include "cocos2d/YUVSprite.h"
+#endif
 
 extern std::thread::id TVPMainThreadID;
 
@@ -407,3 +412,4 @@ VideoPresentOverlay2 * VideoPresentOverlay2::create()
 }
 
 NS_KRMOVIE_END
+#endif // !KRKR2_SDL_BUILD

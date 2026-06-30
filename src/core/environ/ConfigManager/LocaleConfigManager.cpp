@@ -1,9 +1,15 @@
 #include "LocaleConfigManager.h"
-#include "platform/CCFileUtils.h"
 #include "GlobalConfigManager.h"
 #include "tinyxml2/tinyxml2.h"
+#ifdef KRKR2_SDL_BUILD
+#include <sys/stat.h>
+#include <fstream>
+#include <sstream>
+#else
+#include "platform/CCFileUtils.h"
 #include "ui/UIText.h"
 #include "ui/UIButton.h"
+#endif
 
 LocaleConfigManager::LocaleConfigManager() {
 
@@ -11,12 +17,25 @@ LocaleConfigManager::LocaleConfigManager() {
 
 std::string LocaleConfigManager::GetFilePath() {
 	std::string pathprefix = "locale/"; // constant file in app package
-	std::string fullpath = pathprefix + currentLangCode + ".xml"; // exp. "local/en_us.xml"
+	std::string fullpath = pathprefix + currentLangCode + ".xml"; // exp. "locale/en_us.xml"
+#ifdef KRKR2_SDL_BUILD
+	struct stat st;
+	if (stat(fullpath.c_str(), &st) != 0) {
+		if (currentLangCode != "en_us") {
+			currentLangCode = "en_us";
+			return GetFilePath();
+		}
+		// Neither the requested locale nor en_us exists — return empty
+		return "";
+	}
+#else
 	if (!cocos2d::FileUtils::getInstance()->isFileExist(fullpath)) {
-		currentLangCode = "en_us"; // restore to default language config(must exist)
+		currentLangCode = "en_us";
 		return GetFilePath();
 	}
 	return cocos2d::FileUtils::getInstance()->fullPathForFilename(fullpath);
+#endif
+	return fullpath;
 }
 
 LocaleConfigManager* LocaleConfigManager::GetInstance() {
@@ -39,7 +58,17 @@ void LocaleConfigManager::Initialize(const std::string &sysLang) {
 	if (currentLangCode.empty()) currentLangCode = sysLang;
 	AllConfig.clear();
 	tinyxml2::XMLDocument doc;
-	std::string xmlData = cocos2d::FileUtils::getInstance()->getStringFromFile(GetFilePath());
+	std::string xmlData;
+#ifdef KRKR2_SDL_BUILD
+	std::ifstream ifs(GetFilePath());
+	if (ifs) {
+		std::stringstream ss;
+		ss << ifs.rdbuf();
+		xmlData = ss.str();
+	}
+#else
+	xmlData = cocos2d::FileUtils::getInstance()->getStringFromFile(GetFilePath());
+#endif
 	bool _writeBOM = false;
 	const char* p = xmlData.c_str();
 	p = tinyxml2::XMLUtil::ReadBOM(p, &_writeBOM);
@@ -56,6 +85,7 @@ void LocaleConfigManager::Initialize(const std::string &sysLang) {
 	}
 }
 
+#ifndef KRKR2_SDL_BUILD
 bool LocaleConfigManager::initText(cocos2d::ui::Text *ctrl) {
 	if (!ctrl) return false;
 	return initText(ctrl, ctrl->getString());
@@ -94,4 +124,5 @@ bool LocaleConfigManager::initText(cocos2d::ui::Button *ctrl, const std::string 
 	ctrl->setTitleText(txt);
 	return true;
 }
+#endif
 

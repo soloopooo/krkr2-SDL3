@@ -4,9 +4,9 @@ plugins {
 
 android {
     // compileSdkVersion PROP_TARGET_SDK_VERSION
-    ndkVersion '25.2.9519653'
+    ndkVersion '29.0.14206865'
     buildToolsVersion '33.0.2'
-    compileSdkVersion PROP_TARGET_SDK_VERSION.toInteger()
+    compileSdkVersion PROP_COMPILE_SDK_VERSION.toInteger()
     compileOptions {
 //        sourceCompatibility JavaVersion.VERSION_11
 //        targetCompatibility JavaVersion.VERSION_11
@@ -27,7 +27,7 @@ android {
                 cmake {
                     version '3.22.1'
                     targets 'krkr2yuri'
-                    arguments "-DCMAKE_FIND_ROOT_PATH=", "-DANDROID_STL=c++_static", "-DANDROID_TOOLCHAIN=clang", "-DANDROID_ARM_NEON=TRUE"
+                    arguments "-DCMAKE_FIND_ROOT_PATH=", "-DANDROID_STL=c++_static", "-DANDROID_TOOLCHAIN=clang", "-DANDROID_ARM_NEON=TRUE", "-DKRKR2_USE_COCOS2D=OFF", "-DKRKR2_SDL_BUILD=ON"
                     cppFlags "-frtti -fexceptions -fsigned-char"
                 }
             }
@@ -36,6 +36,12 @@ android {
         versionName "1.4.0beta"
     }
     signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'debug'
+            keyPassword 'android'
+        }
         release {
             storeFile file('sign.jks')
             def signPropsFile = file('sign.properties')
@@ -67,7 +73,7 @@ android {
             debuggable true
             jniDebuggable true
             renderscriptDebuggable true
-            signingConfig signingConfigs.release
+            signingConfig signingConfigs.debug
         }
     }
 
@@ -96,12 +102,10 @@ android {
 }
 
 dependencies {
-    //implementation fileTree(dir: 'libs', include: ['*.jar'])
-    implementation project(':cocos2dx')
-
     implementation "androidx.documentfile:documentfile:1.0.1"
     //noinspection GradleDependency
     implementation "androidx.activity:activity:1.2.3"
     //noinspection GradleDependency
     implementation "androidx.fragment:fragment:1.3.4"
+    implementation "com.google.android.material:material:1.9.0"
 }

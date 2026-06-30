@@ -131,6 +131,7 @@ public:
 	//virtual void RefreshBitmap() = 0;
 	virtual cocos2d::Texture2D* GetAdapterTexture(cocos2d::Texture2D* origTex) = 0;
 	virtual bool GetScale(float &x, float &y) { x = 1.f; y = 1.f; return true; }
+	virtual unsigned int GetGLTextureName() const { return 0; }
 
 	static void RecycleProcess();
 };
@@ -171,6 +172,9 @@ public:
 		pElem = arr;
 		nCount = sizeof(arr) / sizeof(arr[0]);
 	}
+
+	tRenderTextureArray(const tRenderTextureArray& other)
+		: pElem(other.pElem), nCount(other.nCount) {}
 
 	const std::pair<iTVPTexture2D*, TElem>& operator[](size_t i) const {
 		return pElem[i];
@@ -217,6 +221,7 @@ public:
 
 	virtual bool IsSoftware() { return false; }
 	virtual const char *GetName() = 0;
+	virtual void RebuildAllShaders() {} // recompile after GL context loss
 
 	virtual bool GetRenderStat(unsigned int &drawCount, uint64_t &vmemsize) = 0;
 	virtual bool GetTextureStat(iTVPTexture2D *texture, uint64_t &vmemsize) { return false; }

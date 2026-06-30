@@ -25,15 +25,24 @@
         tools:targetApi="n">
         <meta-data android:name="android.app.lib_name"
                    android:value="krkr2yuri" />
-        <activity android:name=".MainActivity"
-            android:screenOrientation="sensorLandscape"
-                  android:configChanges="keyboardHidden|orientation|screenSize"
-                  android:windowSoftInputMode="adjustPan" android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+        <activity android:name="com.yuri.kirikiri2.LauncherActivity"
+            android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|locale|layoutDirection|smallestScreenSize|uiMode"
+            android:theme="@style/LauncherTheme"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
+        <activity android:name="com.yuri.kirikiri2.SettingsActivity"
+            android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|locale|layoutDirection|smallestScreenSize|uiMode"
+            android:theme="@style/LauncherTheme"
+            android:exported="false" />
+        <activity android:name=".MainActivity"
+            android:screenOrientation="sensorLandscape"
+                  android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|locale|layoutDirection|smallestScreenSize|uiMode"
+                  android:windowSoftInputMode="adjustResize" android:theme="@style/AppTheme"
+            android:exported="true">
         </activity>
     </application>
 </manifest> 

@@ -18,10 +18,12 @@
 #include "DebugIntf.h"
 #include "tvpgl.h"
 #include "argb.h"
+#include <android/log.h>
 #include "tjsUtils.h"
 #include "ThreadIntf.h"
 #include "gl/ResampleImage.h"
 #include "RenderManager.h"
+#include "RenderManager_software.h"
 #include <assert.h>
 
 //#define TVP_FORCE_BILINEAR
@@ -942,7 +944,7 @@ bool iTVPBaseBitmap::CopyRect(tjs_int x, tjs_int y, const iTVPBaseBitmap *ref,
 		plane == (TVP_BB_COPY_MASK|TVP_BB_COPY_MAIN) &&
 		(bool)!Is32BPP() == (bool)!ref->Is32BPP())
 	{
-		// entire area of both bitmaps
+		//__android_log_print(ANDROID_LOG_INFO, "##krkr", "COPYRECT: fast path AssignTexture srcTex=%p", ref->GetTexture());
 		AssignTexture(ref->GetTexture());
 		return true;
 	}
@@ -1142,11 +1144,11 @@ bool iTVPBaseBitmap::Copy9Patch( const iTVPBaseBitmap *ref, tTVPRect& margin )
 
 	tjs_int w = ref->GetWidth();
 	tjs_int h = ref->GetHeight();
-	// 9 + ã‰º‚Ì11ƒsƒNƒZƒ‹‚Í•K—v
+	// 9 + ï¿½ã‰ºï¿½ï¿½11ï¿½sï¿½Nï¿½Zï¿½ï¿½ï¿½Í•Kï¿½v
 	if( w < 11 || h < 11 ) return false;
 	tjs_int dw = GetWidth();
 	tjs_int dh = GetHeight();
-	// ƒRƒs[æ‚ªŒ³‰æ‘œ‚æ‚è‚à¬‚³‚¢‚ÍƒRƒs[•s‰Â
+	// ï¿½Rï¿½sï¿½[ï¿½æ‚ªï¿½ï¿½ï¿½æ‘œï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÍƒRï¿½sï¿½[ï¿½sï¿½ï¿½
 	if( dw < (w-2) || dh < (h-2) ) return false;
 
 	if (!TVPGetRenderManager()->IsSoftware()) {
@@ -1247,7 +1249,7 @@ bool iTVPBaseBitmap::Copy9Patch( const iTVPBaseBitmap *ref, tTVPRect& margin )
 
 		if( scale.bottom != -1 && margin.bottom != -1 ) break;
 	}
-	// ƒXƒP[ƒ‹—p‚Ì—Ìˆæ‚ªŒ©•t‚©‚ç‚È‚¢‚ÍƒRƒs[‚Å‚«‚È‚¢
+	// ï¿½Xï¿½Pï¿½[ï¿½ï¿½ï¿½pï¿½Ì—Ìˆæ‚ªï¿½ï¿½ï¿½tï¿½ï¿½ï¿½ï¿½È‚ï¿½ï¿½ï¿½ï¿½ÍƒRï¿½sï¿½[ï¿½Å‚ï¿½ï¿½È‚ï¿½
 	if( scale.left == -1 || scale.right == -1 || scale.top == -1 || scale.bottom == -1 )
 		return false;
 	
@@ -1267,7 +1269,7 @@ bool iTVPBaseBitmap::Copy9Patch( const iTVPBaseBitmap *ref, tTVPRect& margin )
 	const tjs_uint32 *s2 = src + pitch + scale.right;
 	tjs_uint32 *d1 = dst;
 	tjs_uint32 *d2 = dst + src_left_width + dst_center_width;
-	// ã‘¤¶‰E’[‚ÌƒRƒs[
+	// ï¿½ã‘¤ï¿½ï¿½ï¿½Eï¿½[ï¿½ÌƒRï¿½sï¿½[
 	for( tjs_int y = 0; y < src_top_height; y++ )
 	{
 		memcpy( d1, s1, src_left_width*sizeof(tjs_uint32));
@@ -1275,11 +1277,11 @@ bool iTVPBaseBitmap::Copy9Patch( const iTVPBaseBitmap *ref, tTVPRect& margin )
 		d1 += dpitch; s1 += pitch;
 		d2 += dpitch; s2 += pitch;
 	}
-	// ã‘¤’†ŠÔ
+	// ï¿½ã‘¤ï¿½ï¿½ï¿½ï¿½
 	const tjs_uint32 *s3 = src + pitch + scale.left;
 	tjs_uint32 *d3 = dst + src_left_width;
 	if( src_center_width == 1 )
-	{   // ƒRƒs[Œ³‚Ì•‚ª1‚Ì‚Í‚»‚ÌF‚Å“h‚è‚Â‚Ô‚·
+	{   // ï¿½Rï¿½sï¿½[ï¿½ï¿½ï¿½Ì•ï¿½ï¿½ï¿½1ï¿½Ìï¿½ï¿½Í‚ï¿½ï¿½ÌFï¿½Å“hï¿½ï¿½Â‚Ô‚ï¿½
 		for( tjs_int y = 0; y < src_top_height; y++ )
 		{
 			TVPFillARGB( d3, dst_center_width, *s3 );
@@ -1290,23 +1292,23 @@ bool iTVPBaseBitmap::Copy9Patch( const iTVPBaseBitmap *ref, tTVPRect& margin )
 	else
 	{   // scale
 		for( tjs_int y = 0; y < src_top_height; y++ )
-		{   // c•ûŒü‚ÍƒuƒŒƒ“ƒh‚µ‚È‚¢‚Ì‚Å‚‘¬‰»o—ˆ‚é‚ªcc
+		{   // ï¿½cï¿½ï¿½ï¿½ï¿½ï¿½Íƒuï¿½ï¿½ï¿½ï¿½ï¿½hï¿½ï¿½ï¿½È‚ï¿½ï¿½Ì‚Åï¿½ï¿½ï¿½ï¿½ï¿½ï¿½oï¿½ï¿½ï¿½é‚ªï¿½cï¿½c
 			TVPInterpStretchCopy( d3, dst_center_width, s3, s3, 0, 0, src_center_step );
 			d3 += dpitch; s3 += pitch;
 		}
 	}
-	// ’†ŠÔˆÊ’u
-	// s1 s2 s3 d1 d2 d3 ‚ÍA’†ŠÔˆÊ’u‚ğw‚µ‚Ä‚¢‚é‚Í‚¸
+	// ï¿½ï¿½ï¿½ÔˆÊ’u
+	// s1 s2 s3 d1 d2 d3 ï¿½ÍAï¿½ï¿½ï¿½ÔˆÊ’uï¿½ï¿½ï¿½wï¿½ï¿½ï¿½Ä‚ï¿½ï¿½ï¿½Í‚ï¿½
 	if( src_center_height == 1 )
 	{
-		// ’†ŠÔˆÊ’u‚Ì—¼’[
+		// ï¿½ï¿½ï¿½ÔˆÊ’uï¿½Ì—ï¿½ï¿½[
 		for( tjs_int y = 0; y < dst_center_height; y ++ )
 		{
 			memcpy( d1, s1, src_left_width*sizeof(tjs_uint32));
 			memcpy( d2, s2, src_right_width*sizeof(tjs_uint32));
 			d1 += dpitch; d2 += dpitch;
 		}
-		// ’†ŠÔˆÊ’u‚Ì^‚ñ’†
+		// ï¿½ï¿½ï¿½ÔˆÊ’uï¿½Ì^ï¿½ï¿½
 		if( src_center_width == 1 )
 		{
 			for( tjs_int y = 0; y < dst_center_height; y ++ )
@@ -1327,24 +1329,24 @@ bool iTVPBaseBitmap::Copy9Patch( const iTVPBaseBitmap *ref, tTVPRect& margin )
 	else
 	{
 		tTVPRect cliprect(0,0,dw,dh);
-		{		// ¶‘¤
+		{		// ï¿½ï¿½ï¿½ï¿½
 			tTVPRect srcrect( 1,        scale.top,     scale.left, scale.bottom );
 			tTVPRect dstrect( 0,   src_top_height, src_left_width,   (src_top_height+dst_center_height) );
 			TVPResampleImage( cliprect, this, dstrect, ref, srcrect, stSemiFastLinear, 0.0f, bmCopy, 255, false );
 		}
-		{		// ’†ŠÔ
+		{		// ï¿½ï¿½ï¿½ï¿½
 			tTVPRect srcrect(     scale.left,      scale.top,                     scale.right, scale.bottom );
 			tTVPRect dstrect( src_left_width, src_top_height, src_left_width+dst_center_width, src_top_height+dst_center_height );
 			TVPResampleImage( cliprect, this, dstrect, ref, srcrect, stSemiFastLinear, 0.0f, bmCopy, 255, false );   
 		}
-		{		// ‰E‘¤
+		{		// ï¿½Eï¿½ï¿½
 			tTVPRect srcrect(          scale.right,        scale.top, w-1, scale.bottom );
 			tTVPRect dstrect( dw - src_right_width,   src_top_height,  dw,   src_top_height+dst_center_height );
 			TVPResampleImage( cliprect, this, dstrect, ref, srcrect, stSemiFastLinear, 0.0f, bmCopy, 255, false );
 		}
 	}
 	
-	// ‰º‘¤¶‰E’[‚ÌƒRƒs[
+	// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Eï¿½[ï¿½ÌƒRï¿½sï¿½[
 	s1 = src + pitch * scale.bottom + 1;
 	s2 = src + pitch * scale.bottom + scale.right;
 	d1 = dst + dpitch * (dh-src_bottom_height);
@@ -1356,11 +1358,11 @@ bool iTVPBaseBitmap::Copy9Patch( const iTVPBaseBitmap *ref, tTVPRect& margin )
 		d1 += dpitch; s1 += pitch;
 		d2 += dpitch; s2 += pitch;
 	}
-	// ‰º‘¤’†ŠÔ
+	// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	s3 = src + pitch * scale.bottom + scale.left;
 	d3 = dst + dpitch * (dh-src_bottom_height) + src_left_width;
 	if( src_center_width == 1 )
-	{   // ƒRƒs[Œ³‚Ì•‚ª1‚Ì‚Í‚»‚ÌF‚Å“h‚è‚Â‚Ô‚·
+	{   // ï¿½Rï¿½sï¿½[ï¿½ï¿½ï¿½Ì•ï¿½ï¿½ï¿½1ï¿½Ìï¿½ï¿½Í‚ï¿½ï¿½ÌFï¿½Å“hï¿½ï¿½Â‚Ô‚ï¿½
 		for( tjs_int y = 0; y < src_bottom_height; y++ )
 		{
 			TVPFillARGB( d3, dst_center_width, *s3 );
@@ -1390,8 +1392,9 @@ bool iTVPBaseBitmap::Blt(tjs_int x, tjs_int y, const iTVPBaseBitmap *ref,
 	// this function does not matter whether source and destination bitmap is
 	// overlapped.
 
-	if(opa == 255 && method == bmCopy && !hda)
+	if(opa == 255 && method == bmCopy && GetRenderManager()->IsSoftware())
 	{
+		//__android_log_print(ANDROID_LOG_INFO, "##krkr", "BLT: CopyRect fast path (bmCopy opa=255 software)");
 		return CopyRect(x, y, ref, refrect);
 	}
 
@@ -1457,13 +1460,54 @@ bool iTVPBaseBitmap::Blt(tjs_int x, tjs_int y, const iTVPBaseBitmap *ref,
 
 	if(refrect.top >= refrect.bottom) return false; // not drawable
 
+	iTVPRenderManager *mgr = GetRenderManager();
+	if (!mgr->IsSoftware()) {
+		// CPU fallback for non-software renderers (OGL FBO compositing broken)
+		iTVPRenderManager *swMgr = TVPGetSoftwareRenderManager();
+		iTVPRenderMethod *swMethod = swMgr->GetRenderMethod(opa, hda, method);
+		if (!swMethod) { /*__android_log_print(ANDROID_LOG_INFO, "##krkr", "BLT: no swMethod...");*/ return false; }
+		tTVPRenderMethod_Software *swImpl = static_cast<tTVPRenderMethod_Software*>(swMethod);
+		iTVPTexture2D *dstTex = GetTextureForRender(swMethod->IsBlendTarget(), &rect);
+		iTVPTexture2D *srcTex = ref->GetTexture();
+		//__android_log_print(ANDROID_LOG_INFO, "##krkr", "BLT: CPU fallback dstTex=%p srcTex=%p rect=(%d,%d-%d,%d) opa=%d hda=%d method=%d",
+		//	dstTex, srcTex, rect.left, rect.top, rect.right, rect.bottom, opa, hda, method);
+		// Ensure both textures have CPU pixel data
+		dstTex->GetScanLineForRead(0);
+		srcTex->GetScanLineForRead(0);
+		// Diagnostic: sample source pixels before blend (only for small rects â€” likely fonts)
+		if (refrect.get_width() <= 256 && refrect.get_height() <= 64 && srcTex->GetPixelData()) {
+			uint32_t *sp = (uint32_t*)srcTex->GetScanLineForRead(0);
+			int spw = srcTex->GetPitch() / 4;
+			uint32_t sp00 = sp[refrect.top * spw + refrect.left];
+			__android_log_print(ANDROID_LOG_INFO, "##krkr", "TXT_DIAG: src=(%d,%d,%d,%d) sp[0]=0x%08x",
+				refrect.left, refrect.top, refrect.right, refrect.bottom, sp00);
+		}
+		swImpl->DoRender(dstTex, rect, dstTex, rect, srcTex, refrect, nullptr, refrect);
+		// Diagnostic: read back dest pixel after blend
+		if (rect.get_width() <= 256 && rect.get_height() <= 64) {
+			uint32_t *dp = (uint32_t*)dstTex->GetScanLineForRead(0);
+			int dpw = dstTex->GetPitch() / 4;
+			uint32_t dp00 = dp[rect.top * dpw + rect.left];
+			if (dp00) {
+				__android_log_print(ANDROID_LOG_INFO, "##krkr", "TXT_DIAG: AFTER dst[%d,%d]=0x%08x (OK non-zero!)",
+					rect.left, rect.top, dp00);
+			}
+		}
+		// PixelData now has blended result, IsTextureDirty=true.
+		// Upload to GL happens once per frame in _useOGLTexture (WindowLayer_sdl.cpp).
+		// NOT calling Update() here â€” keeping PixelData alive avoids per-frame glReadPixels.
+		return true;
+	}
+	// Original path: software compositing through OperateRect
 	tRenderTexRectArray::Element src_tex[] = {
 		tRenderTexRectArray::Element(ref->GetTexture(), refrect)
 	};
-	iTVPRenderManager *mgr = GetRenderManager();
 	iTVPRenderMethod *rmethod = mgr->GetRenderMethod(opa, hda, method);
-	if (!rmethod) return false;
+	if (!rmethod) { /*__android_log_print(ANDROID_LOG_INFO, "##krkr", "BLT: no rmethod...");*/ return false; }
 	iTVPTexture2D *reftex = GetTexture();
+		//__android_log_print(ANDROID_LOG_INFO, "##krkr", "BLT: OperateRect destTex=%p srcTex=%p rect=(%d,%d-%d,%d) opa=%d hda=%d method=%d",
+		//	GetTextureForRender(rmethod->IsBlendTarget(), &rect), reftex,
+		//	rect.left, rect.top, rect.right, rect.bottom, opa, hda, method);
 	mgr->OperateRect(rmethod, GetTextureForRender(rmethod->IsBlendTarget(), &rect), reftex,
 		rect, tRenderTexRectArray(src_tex));
 #if 0

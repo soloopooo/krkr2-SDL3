@@ -19,6 +19,8 @@
 #include "Platform.h"
 #include "ConfigManager/IndividualConfigManager.h"
 #include "opencv2/opencv.hpp"
+#include <android/log.h>
+#include <cmath>
 #include <deque>
 #include <algorithm>
 #include <unordered_set>
@@ -412,6 +414,19 @@ static bool _CurrentFBOValid = false;
 static GLuint _FBO; // common frame buffer object for all renderable texture
 static GLuint _stencil_FBO;
 static GLuint _CurrentRenderTarget = 0;
+extern "C" void TVPReinitFBO() {
+	__android_log_print(ANDROID_LOG_INFO, "##krkr", "TVPReinitFBO: _FBO=%u (recreating)", _FBO);
+	if (_FBO) glDeleteFramebuffers(1, &_FBO);
+	if (_stencil_FBO) glDeleteRenderbuffers(1, &_stencil_FBO);
+	_FBO = 0;
+	_stencil_FBO = 0;
+	glGenFramebuffers(1, &_FBO);
+	glGenRenderbuffers(1, &_stencil_FBO);
+	_CurrentFBOValid = false;
+	_CurrentRenderTarget = 0;
+	__android_log_print(ANDROID_LOG_INFO, "##krkr", "TVPReinitFBO: new _FBO=%u _stencil_FBO=%u", _FBO, _stencil_FBO);
+}
+extern "C" GLuint TVPGetFBO() { return _FBO; }
 static GLenum _glCompressedTexFormat = GL_RGBA;
 unsigned int TVPMaxTextureSize;
 static uint64_t _totalVMemSize = 0;
@@ -439,7 +454,7 @@ static void _glBindTexture2D(GLuint t) {
 static GLint _prevRenderBuffer;
 static GLint  _screenFrameBuffer = 0;
 static unsigned int _stencilBufferW = 0, _stencilBufferH = 0;
-void TVPSetRenderTarget(GLuint t)
+extern "C" void TVPSetRenderTarget(GLuint t)
 {
 	if (t) {
 		if (!_CurrentFBOValid) {
@@ -447,7 +462,6 @@ void TVPSetRenderTarget(GLuint t)
 			glGetIntegerv(GL_FRAMEBUFFER_BINDING, &_screenFrameBuffer);
 			glBindFramebuffer(GL_FRAMEBUFFER, _FBO);
 		}
-		if (_CurrentRenderTarget == t) return;
 		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t, 0);
 	} else {
 		glBindFramebuffer(GL_FRAMEBUFFER, _screenFrameBuffer);
@@ -931,6 +945,8 @@ protected:
 		return ret;
 	}
 public:
+	virtual unsigned int GetGLTextureName() const override { return texture; }
+
 	virtual bool IsOpaque() override {
 		switch (Format) {
 		case TVPTextureFormat::Gray:
@@ -2153,6 +2169,7 @@ static iTVPTexture2D * (*_CreateStaticTexture2D)(const void *dib, tjs_uint tw, t
 static iTVPTexture2D * (*_CreateMutableTexture2D)(const void *pixel, int pitch, unsigned int w, unsigned int h, TVPTextureFormat::e format);
 static const char *_glExtensions = nullptr;
 //static bool _duplicateTargetTexture = true;
+iTVPRenderManager * TVPGetSoftwareRenderManager();
 class TVPRenderManager_OpenGL : public iTVPRenderManager {
 protected:
 	virtual tTVPOGLRenderMethod_Script* GetRenderMethodFromScript(const char *script, int nTex, unsigned int flags) {
@@ -3581,7 +3598,7 @@ public:
 		dst->AsTarget();
 		float sw, sh;
 		dst->GetScale(sw, sh);
-		glViewport(0, 0, rcsrc.get_width() * sw, rcsrc.get_height() * sh);
+		glViewport(0, 0, (GLsizei)ceilf(rcsrc.get_width() * sw), (GLsizei)ceilf(rcsrc.get_height() * sh));
 		CHECK_GL_ERROR_DEBUG();
 		int VA_flag = 1 << method->GetPosAttr();
 		for (unsigned int i = 0; i < 1; ++i) {
@@ -3719,8 +3736,8 @@ public:
 			};
 			method->Apply();
 			tar->AsTarget();
-			glViewport(rctar.left * tar->_scaleW, rctar.top * tar->_scaleH,
-				rctar.get_width() * tar->_scaleW, rctar.get_height() * tar->_scaleH);
+			glViewport((GLint)(rctar.left * tar->_scaleW), (GLint)(rctar.top * tar->_scaleH),
+				(GLsizei)ceilf(rctar.get_width() * tar->_scaleW), (GLsizei)ceilf(rctar.get_height() * tar->_scaleH));
 			int VA_flag = 1 << method->GetPosAttr();
 			for (unsigned int i = 0; i < texlist.size(); ++i) {
 				VA_flag |= 1 << method->GetTexCoordAttr(i);
@@ -3731,7 +3748,8 @@ public:
 				method->ApplyTexture(i, texlist[i]);
 			}
 			glDrawArrays(GL_TRIANGLES, 0, 6);
-        //}
+			glFlush();
+
 		method->onFinish();
         CHECK_GL_ERROR_DEBUG();
 #ifdef _DEBUG
@@ -3760,6 +3778,20 @@ public:
 	virtual void OperateTriangles(iTVPRenderMethod* _method, int nTriangles,
 		iTVPTexture2D *_tar, iTVPTexture2D *reftar, const tTVPRect& rcclip, const tTVPPointD* _pttar,
 		const tRenderTexQuadArray &textures) {
+		// CPU fallback for non-software renderers (OGL FBO compositing is broken)
+		if (!TVPIsSoftwareRenderManager() && textures.size() >= 1) {
+			iTVPRenderMethod *swMethod = TVPGetSoftwareRenderManager()->GetRenderMethod(_method->GetName().c_str());
+			if (swMethod) {
+				// Ensure CPU pixel data is available
+				_tar->GetScanLineForRead(0);
+				for (unsigned int i = 0; i < textures.size(); ++i)
+					textures[i].first->GetScanLineForRead(0);
+				// Forward to software OperateTriangles (handles quadâ†’OperateRect, non-quadâ†’OpenCV)
+				TVPGetSoftwareRenderManager()->OperateTriangles(swMethod, nTriangles,
+					_tar, reftar, rcclip, _pttar, textures);
+				return;
+			}
+		}
 		++_drawCount;
 		tTVPOGLRenderMethod *method = (tTVPOGLRenderMethod*)_method;
 		tTVPOGLTexture2D *tar = (tTVPOGLTexture2D *)_tar;
@@ -3966,13 +3998,13 @@ public:
 
 			// pass to OperateTriangles
 			tTVPPointD pttar[6] = {
-				dstpt[0], // ×óÉÏ
-				dstpt[1], // ÓÒÉÏ
-				dstpt[2], // ×óÏÂ
+				dstpt[0], // ï¿½ï¿½ï¿½ï¿½
+				dstpt[1], // ï¿½ï¿½ï¿½ï¿½
+				dstpt[2], // ï¿½ï¿½ï¿½ï¿½
 
-				dstpt[1], // ÓÒÉÏ
-				dstpt[2], // ×óÏÂ
-				dstpt[3], // ÓÒÏÂ
+				dstpt[1], // ï¿½ï¿½ï¿½ï¿½
+				dstpt[2], // ï¿½ï¿½ï¿½ï¿½
+				dstpt[3], // ï¿½ï¿½ï¿½ï¿½
 			}, pttex[6] = {
 				srcpt[0],
 				srcpt[1],
@@ -4027,6 +4059,51 @@ public:
 		static_cast<tTVPOGLTexture2D*>(target)->AsTarget();
 	}
 
+	virtual void RebuildAllShaders() override {
+		tTVPOGLRenderMethod_Script::ClearCache();
+		for (auto &it : AllMethods) {
+			tTVPOGLRenderMethod *method = static_cast<tTVPOGLRenderMethod*>(it.second);
+			method->Rebuild();
+		}
+		// Verify first 5 methods' program validity
+		{
+			int n = 0;
+			for (auto &it : AllMethods) {
+				if (n++ >= 5) break;
+				tTVPOGLRenderMethod *m = static_cast<tTVPOGLRenderMethod*>(it.second);
+				GLint lnk = 0, att = 0;
+				if (m->program && glIsProgram(m->program)) {
+					glGetProgramiv(m->program, GL_LINK_STATUS, &lnk);
+					glGetAttachedShaders(m->program, 1, nullptr, (GLuint*)&att);
+				}
+				__android_log_print(ANDROID_LOG_INFO, "##krkr", "OGL: method '%s' prog=%u linked=%d shaders=%d",
+					m->GetName().c_str(), m->program, lnk, att);
+			}
+		}
+	}
+
 };
 
-REGISTER_RENDERMANAGER(TVPRenderManager_OpenGL, opengl);
+// Replacement for REGISTER_RENDERMANAGER macro: explicit function called from
+// TVPGetRenderManager() to avoid linker stripping the static global.
+extern "C" void TVPRegisterOGLRenderer() {
+	static bool registered = false;
+	if (!registered) {
+		TVPRegisterRenderManager("opengl",
+			[]() -> iTVPRenderManager* { return new TVPRenderManager_OpenGL; });
+		registered = true;
+	}
+}
+
+// Called after a valid GL context is available to re-initialize FBO, screen frame buffer,
+// and recompile all shaders (they were compiled without a GL context in the constructor).
+extern "C" void TVPReinitOGL() {
+	TVPReinitFBO();
+	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &_screenFrameBuffer);
+	__android_log_print(ANDROID_LOG_INFO, "##krkr", "TVPReinitOGL: _screenFrameBuffer=%u", _screenFrameBuffer);
+	TVPInitTextureFormatList();
+	TVPInitGLExtensionInfo();
+	TVPInitGLExtensionFunc();
+	iTVPRenderManager *mgr = TVPGetRenderManager();
+	if (mgr) mgr->RebuildAllShaders();
+}

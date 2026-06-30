@@ -9,6 +9,7 @@
 // Base Layer Bitmap implementation
 //---------------------------------------------------------------------------
 #define _USE_MATH_DEFINES
+#include <android/log.h>
 #include "tjsCommHead.h"
 
 #include <memory>
@@ -94,8 +95,8 @@ static tTVPAtExit
 void TVPSetFontRasterizer( tjs_int index ) {
 	if( TVPCurrentFontRasterizers != index && index >= 0 && index < FONT_RASTER_EOT ) {
 		TVPCurrentFontRasterizers = index;
-		TVPClearFontCache(); // ƒ‰ƒXƒ^ƒ‰ƒCƒU‚ªØ‚è‘Ö‚í‚éŽžAƒLƒƒƒbƒVƒ…‚ÍƒNƒŠƒA‚µ‚Ä‚µ‚Ü‚¤
-		TVPGlobalFontStateMagic++; // ApplyFont ‚ª‘–‚é‚æ‚¤‚É‚·‚é
+		TVPClearFontCache(); // ï¿½ï¿½ï¿½Xï¿½^ï¿½ï¿½ï¿½Cï¿½Uï¿½ï¿½ï¿½Ø‚ï¿½Ö‚ï¿½éŽžï¿½Aï¿½Lï¿½ï¿½ï¿½bï¿½Vï¿½ï¿½ï¿½ÍƒNï¿½ï¿½ï¿½Aï¿½ï¿½ï¿½Ä‚ï¿½ï¿½Ü‚ï¿½
+		TVPGlobalFontStateMagic++; // ApplyFont ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½æ‚¤ï¿½É‚ï¿½ï¿½ï¿½
 	}
 }
 tjs_int TVPGetFontRasterizer() {
@@ -135,7 +136,11 @@ static std::vector<tTVPPrerenderedFontMap> TVPPrerenderedFontMapVector;
 void TVPMapPrerenderedFont(const tTVPFont & font, const ttstr & storage)
 {
 	// map specified font to specified prerendered font
-	ttstr fn = TVPSearchPlacedPath(storage);
+#ifdef KRKR2_SDL_BUILD
+	return; // SDL: prerendered fonts not supported, skip silently
+#else
+	ttstr fn = storage;
+	fn = TVPSearchPlacedPath(storage);
 
 	// search or retrieve specified storage
 	tTVPPrerenderedFont * object;
@@ -179,6 +184,7 @@ void TVPMapPrerenderedFont(const tTVPFont & font, const ttstr & storage)
 	TVPGlobalFontStateMagic ++; // increase magic number
 
 	TVPClearFontCache(); // clear font cache
+#endif
 }
 //---------------------------------------------------------------------------
 void TVPUnmapPrerenderedFont(const tTVPFont & font)
@@ -676,6 +682,12 @@ bool tTVPNativeBaseBitmap::AssignBitmap(const tTVPNativeBaseBitmap &rhs)
 bool tTVPNativeBaseBitmap::AssignTexture(iTVPTexture2D *tex)
 {
 	if (Bitmap == tex) return false;
+	unsigned int oldGL = 0, newGL = 0;
+	if (Bitmap) oldGL = Bitmap->GetGLTextureName();
+	if (tex) newGL = tex->GetGLTextureName();
+		//__android_log_print(ANDROID_LOG_INFO, "##krkr", "ASSIGN_TEX: old=%p(gl=%u) new=%p(gl=%u) w=%d h=%d",
+		//	(void*)Bitmap, oldGL, (void*)tex, newGL,
+		//	tex ? tex->GetWidth() : 0, tex ? tex->GetHeight() : 0);
 
 	Bitmap->Release();
 	Bitmap = tex;// CreateTexture2D(bmp);

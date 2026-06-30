@@ -19,6 +19,9 @@
 #include "SystemIntf.h"
 
 #include "Exception.h"
+#include <android/log.h>
+#define TVP_DEBUG_LOG(msg) __android_log_print(ANDROID_LOG_ERROR, "##krkr", "%s", msg)
+#include "base/CharacterSet.h"
 //#include "Resource.h"
 #include "SystemControl.h"
 //#include "MouseCursor.h"
@@ -273,6 +276,7 @@ void TVPOnError();
 void TVPLockSoundMixer();
 void TVPUnlockSoundMixer();
 
+#ifndef KRKR2_SDL_BUILD
 static bool _warnLowMem = true;
 void TVPCheckMemory() {
 #if defined(_DEBUG)
@@ -301,6 +305,7 @@ int TVPShowSimpleMessageBoxYesNo(const ttstr & text, const ttstr & caption) {
 	normal.emplace_back(mgr->GetText("msgbox_no"));
 	return TVPShowSimpleMessageBox(text, caption, normal);
 }
+#endif
 
 ttstr TVPGetMessageByLocale(const std::string &key) {
 	return LocaleConfigManager::GetInstance()->GetText(key);
@@ -569,26 +574,33 @@ bool tTVPApplication::StartApplication(ttstr path) {
 	// try starting the program!
 	try {
 //		if(TVPCheckProcessLog()) return true; // sub-process for processing object hash map log
-
+		TVP_DEBUG_LOG("StartApplication: NormalizeName");
 		TVPProjectDir = TVPNormalizeStorageName(path);
 
+		TVP_DEBUG_LOG("StartApplication: InitScriptEngine");
 		TVPInitScriptEngine();
+		TVP_DEBUG_LOG("StartApplication: InitFontNames");
 		TVPInitFontNames();
 
 		// banner
 		TVPAddImportantLog( TVPFormatMessage(TVPProgramStartedOn, TVPGetOSName(), TVPGetPlatformName()) );
 
+		TVP_DEBUG_LOG("StartApplication: InitBaseSystems");
 		// TVPInitializeBaseSystems
 		TVPInitializeBaseSystems();
 
+		TVP_DEBUG_LOG("StartApplication: Initialize");
 		Initialize();
 
 		if(TVPCheckPrintDataPath()) return true;
 		if(TVPExecuteUserConfig()) return true;
 		
+		TVP_DEBUG_LOG("StartApplication: ImageLoader");
 		image_load_thread_ = new tTVPAsyncImageLoader();
 
+		TVP_DEBUG_LOG("StartApplication: LoadPlugins");
 		TVPLoadPluigins(); // load plugin module *.tpm
+		TVP_DEBUG_LOG("StartApplication: SystemInit");
 		TVPSystemInit();
 
 		if(TVPCheckAbout()) return true; // version information dialog box;
@@ -601,7 +613,10 @@ bool tTVPApplication::StartApplication(ttstr path) {
 		// start image load thread
 		image_load_thread_->Resume();
 
-		/*if(TVPProjectDirSelected)*/ TVPInitializeStartupScript();
+		TVP_DEBUG_LOG("StartApplication: InitStartupScript");
+		__android_log_print(ANDROID_LOG_INFO, "##krkr", "StartApplication: before TVPInitializeStartupScript");
+		TVPInitializeStartupScript();
+		__android_log_print(ANDROID_LOG_INFO, "##krkr", "StartApplication: after TVPInitializeStartupScript");
 		_project_startup = true;
 //		Run();
 #if 0
@@ -759,6 +774,11 @@ void tTVPApplication::BringToFront() {
 }
 #endif
 void tTVPApplication::ShowException(const ttstr& e) {
+	{
+		char buf[4096];
+		TVPWideCharToUtf8String(e.c_str(), buf);
+		__android_log_print(ANDROID_LOG_ERROR, "##krkr", "ShowException: %s", buf);
+	}
 	TVPShowSimpleMessageBox(e, TVPGetErrorDialogTitle());
 	TVPSystemUninit();
 	TVPExitApplication(0);

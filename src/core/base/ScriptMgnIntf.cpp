@@ -10,6 +10,8 @@
 //---------------------------------------------------------------------------
 
 #include "tjsCommHead.h"
+#include <android/log.h>
+#define TVP_SCRIPT_LOG(msg) __android_log_print(ANDROID_LOG_ERROR, "##krkr", "ScriptException: %s", msg)
 
 #include "tjs.h"
 #include "tjsDebug.h"
@@ -879,6 +881,7 @@ void TVPOpenPatchLibUrl();
 //---------------------------------------------------------------------------
 // TVPExecuteStartupScript
 //---------------------------------------------------------------------------
+#ifndef KRKR2_SDL_BUILD
 void TVPExecuteStartupScript()
 {
 	ttstr strPatchError;
@@ -930,11 +933,14 @@ void TVPExecuteStartupScript()
 
             ttstr place(TVPSearchPlacedPath(TVPStartupScriptName));
             TVPAddLog(TJS_W("(info) Loading startup script : ") + place);
+			__android_log_print(ANDROID_LOG_INFO, "##krkr", "TVPExecuteStartupScript: before TVPStartupScriptName exec");
 			TVPStartupSuccess = false;
             try {
                 iTJSTextReadStream * stream = TVPCreateTextStreamForRead(place, "");
                 stream->Destruct();
+				__android_log_print(ANDROID_LOG_INFO, "##krkr", "TVPExecuteStartupScript: calling TVPExecuteStorage");
                 TVPExecuteStorage(TVPStartupScriptName);
+				__android_log_print(ANDROID_LOG_INFO, "##krkr", "TVPExecuteStartupScript: after TVPExecuteStorage");
 				TVPStartupSuccess = true;
             }
             catch (...)
@@ -961,6 +967,22 @@ void TVPExecuteStartupScript()
 	//}
 	//TVP_CATCH_AND_SHOW_SCRIPT_EXCEPTION(TJS_W("startup"))
 }
+#else
+void TVPExecuteStartupScript()
+{
+	__android_log_print(ANDROID_LOG_INFO, "##krkr", "TVPExecuteStartupScript: running minimal KAG init");
+
+	// Run real startup.tjs with System.inform stubbed (avoids dialog blocking)
+	static const tjs_char *startupCode =
+		TJS_W("System.inform = function(m) { Debug.message(m); };\n"
+		"Scripts.execStorage('startup.tjs');\n");
+	tTJSVariant result;
+	if (TVPScriptEngine) {
+		TVPScriptEngine->ExecScript(startupCode, &result, NULL, NULL, 0);
+	}
+	__android_log_print(ANDROID_LOG_INFO, "##krkr", "TVPExecuteStartupScript: done");
+}
+#endif
 //---------------------------------------------------------------------------
 
 
@@ -1193,6 +1215,10 @@ void TVPShowScriptException(eTJS &e)
 	{
 		ttstr errstr = (ttstr(TVPScriptExceptionRaised) + TJS_W("\n") + e.GetMessage());
 		TVPAddLog(ttstr(TVPScriptExceptionRaised) + TJS_W("\n") + e.GetMessage());
+		{
+			std::string narrow = errstr.AsNarrowStdString();
+			TVP_SCRIPT_LOG(narrow.c_str());
+		}
 		TVPShowSimpleMessageBox(errstr, TVPGetErrorDialogTitle());
 		//Application->MessageDlg( errstr.AsStdString(), std::wstring(), mtError, mbOK );
 		TVPTerminateSync(1);
@@ -1208,6 +1234,10 @@ void TVPShowScriptException(eTJSScriptError &e)
 	{
 		ttstr errstr = (ttstr(TVPScriptExceptionRaised) + TJS_W("\n") + e.GetMessage());
 		TVPAddLog(ttstr(TVPScriptExceptionRaised) + TJS_W("\n") + e.GetMessage());
+		{
+			std::string narrow = errstr.AsNarrowStdString();
+			TVP_SCRIPT_LOG(narrow.c_str());
+		}
 		if(e.GetTrace().GetLen() != 0)
 			TVPAddLog(ttstr(TJS_W("trace : ")) + e.GetTrace());
 		TVPShowSimpleMessageBox(errstr, TVPGetErrorDialogTitle());
@@ -1229,11 +1259,11 @@ void TVPShowScriptException(eTJSScriptError &e)
 				tjs_int lineno = 1+e.GetBlockNoAddRef()->SrcPosToLine(e.GetPosition() )- e.GetBlockNoAddRef()->GetLineOffset();
 
 #if defined(WIN32) && defined(_DEBUG) && !defined(ENABLE_DEBUGGER)
-// ƒfƒoƒbƒKŽÀs‚³‚ê‚Ä‚¢‚éŽžAVisual Studio ‚ÅsƒWƒƒƒ“ƒv‚·‚éŽž‚ÌŽw’è‚ðƒfƒoƒbƒOo—Í‚Éo‚µ‚ÄAbreak ‚Å’âŽ~‚·‚é
+// ï¿½fï¿½oï¿½bï¿½Kï¿½ï¿½ï¿½sï¿½ï¿½ï¿½ï¿½Ä‚ï¿½ï¿½éŽžï¿½AVisual Studio ï¿½Åsï¿½Wï¿½ï¿½ï¿½ï¿½ï¿½vï¿½ï¿½ï¿½éŽžï¿½ÌŽwï¿½ï¿½ï¿½ï¿½fï¿½oï¿½bï¿½Oï¿½oï¿½Í‚Éoï¿½ï¿½ï¿½ÄAbreak ï¿½Å’ï¿½~ï¿½ï¿½ï¿½ï¿½
 				if( ::IsDebuggerPresent() ) {
 					std::wstring debuglile( std::wstring(L"2>")+path.AsStdString()+L"("+std::to_wstring(lineno)+L"): error :" + errstr.AsStdString() );
 					::OutputDebugString( debuglile.c_str() );
-					// ‚±‚±‚Å break‚Å’âŽ~‚µ‚½ŽžA’¼‘O‚Ìo—Ís‚ðƒ_ƒuƒ‹ƒNƒŠƒbƒN‚·‚ê‚ÎA—áŠO‰ÓŠ‚ÌƒXƒNƒŠƒvƒg‚ðVisual Studio‚ÅŠJ‚¯‚é
+					// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ breakï¿½Å’ï¿½~ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Aï¿½ï¿½ï¿½Oï¿½Ìoï¿½Ísï¿½ï¿½ï¿½_ï¿½uï¿½ï¿½ï¿½Nï¿½ï¿½ï¿½bï¿½Nï¿½ï¿½ï¿½ï¿½ÎAï¿½ï¿½Oï¿½Óï¿½ï¿½ÌƒXï¿½Nï¿½ï¿½ï¿½vï¿½gï¿½ï¿½Visual Studioï¿½ÅŠJï¿½ï¿½ï¿½ï¿½
 					::DebugBreak();
 				}
 #endif
@@ -1276,7 +1306,9 @@ void TVPInitializeStartupScript()
 {
 	TVPStartObjectHashMap();
 
+	__android_log_print(ANDROID_LOG_INFO, "##krkr", "TVPInitializeStartupScript: before TVPExecuteStartupScript");
 	TVPExecuteStartupScript();
+	__android_log_print(ANDROID_LOG_INFO, "##krkr", "TVPInitializeStartupScript: after TVPExecuteStartupScript");
 	if(TVPTerminateOnNoWindowStartup && TVPGetWindowCount() == 0 ) {
 		// no window is created and main window is invisible
 		Application->Terminate();

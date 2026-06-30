@@ -7,6 +7,7 @@ typedef cocos2d::Texture2D::PixelFormat CCPixelFormat;
 #include "tvpgl.h"
 #include <assert.h>
 #include <algorithm>
+#include <android/log.h>
 #include "ThreadIntf.h"
 #include "argb.h"
 extern "C" {
@@ -27,6 +28,9 @@ extern "C" {
 #include "tjsHashSearch.h"
 #include "EventIntf.h"
 #include "lz4/lz4.h"
+#ifdef KRKR2_SDL_BUILD
+extern "C" void TVPRegisterGPURenderer();
+#endif
 
 #ifdef _MSC_VER
 #pragma comment(lib,"opencv_ts300d.lib")
@@ -4390,11 +4394,18 @@ iTVPRenderManager * TVPGetRenderManager(const ttstr &name)
 	return mgr;
 }
 
-iTVPRenderManager * TVPGetRenderManager() {
+	iTVPRenderManager * TVPGetRenderManager() {
 	static iTVPRenderManager *_RenderManager;
 	if (!_RenderManager) {
+#ifdef KRKR2_SDL_BUILD
+		TVPRegisterGPURenderer();
+		ttstr str = "software";
+#else
 		ttstr str = IndividualConfigManager::GetInstance()->GetValue<std::string>("renderer", "software");
+#endif
 		_RenderManager = TVPGetRenderManager(str);
+		__android_log_print(ANDROID_LOG_INFO, "##krkr", "TVPGetRenderManager: selected '%s', IsSoftware=%d",
+			str.AsStdString().c_str(), _RenderManager->IsSoftware());
 	}
 	return _RenderManager;
 }
@@ -4405,8 +4416,14 @@ bool TVPIsSoftwareRenderManager() {
 }
 
 iTVPRenderManager * TVPGetSoftwareRenderManager() { // for province image process
-	static tTVPSoftwareRenderManager* mgr = new tTVPSoftwareRenderManager;
-	return mgr;
+	static struct InitHelper {
+		tTVPSoftwareRenderManager* mgr;
+		InitHelper() {
+			mgr = new tTVPSoftwareRenderManager;
+			mgr->Initialize();
+		}
+	} helper;
+	return helper.mgr;
 }
 
 static class __tTVPSoftwareRenderManagerAutoReigster{

@@ -42,7 +42,9 @@
 #include "vkdefine.h"
 #include "RenderManager.h"
 #include <cstdlib>
+#include <android/log.h>
 #include "FontImpl.h"
+
 
 extern void TVPSetFontRasterizer( tjs_int index );
 extern tjs_int TVPGetFontRasterizer();
@@ -2538,7 +2540,6 @@ iTJSDispatch2 * tTJSNI_BaseLayer::LoadImages(const ttstr &name, tjs_uint32 color
 
 	ttstr provincename;
 	iTJSDispatch2 * metainfo = NULL;
-
 	TVPLoadGraphic(MainImage, name, colorkey, 0, 0, glmNormal, &provincename, &metainfo);
 	try
 	{
@@ -5244,7 +5245,11 @@ void tTJSNI_BaseLayer::MapPrerenderedFont(const ttstr & storage)
 {
 	ApplyFont();
 
+#ifdef KRKR2_SDL_BUILD
+	return; // SDL: skip prerendered fonts entirely
+#else
 	MainImage->MapPrerenderedFont(storage);
+#endif
 }
 //---------------------------------------------------------------------------
 void tTJSNI_BaseLayer::UnmapPrerenderedFont()
@@ -5831,7 +5836,6 @@ void tTJSNI_BaseLayer::DrawSelf(tTVPDrawable *target, tTVPRect &pr,
 				tTVPRect bitmaprect = cr;
 				bitmaprect.set_offsets(0, 0);
 				CopySelf(temp, 0, 0, bitmaprect); // this fills temp with neutral color
-
 				// send completion message
 				target->DrawCompleted(pr, temp, bitmaprect, DisplayType, Opacity);
 			}
@@ -5845,6 +5849,7 @@ void tTJSNI_BaseLayer::DrawSelf(tTVPDrawable *target, tTVPRect &pr,
 		return;
 	}
 
+	//__android_log_print(ANDROID_LOG_INFO, "##krkr", "GPU_SELF: DrawSelf target=%p MainImage=%p opa=%d dispType=%d InTrans=%d", target, MainImage, (int)Opacity, DisplayType, (int)InTransition);
 	// draw self MainImage(only) to target
 	cr.add_offsets(-ImageLeft, -ImageTop);
 
@@ -5980,9 +5985,10 @@ void tTJSNI_BaseLayer::Draw_GPU(tTVPDrawable *target, int x, int y, const tTVPRe
     if(visiblecheck && !IsSeen()) return;
 
 	tTVPRect rect;
-    if(!TVPIntersectRect(&rect, r, Rect)) return; // no intersection
+		if(!TVPIntersectRect(&rect, r, Rect)) { /*__android_log_print(ANDROID_LOG_INFO, "##krkr", "GPU_DRAW: no intersection...");*/ return; }
 	x += rect.left - r.left;
 	y += rect.top - r.top;
+		//__android_log_print(ANDROID_LOG_INFO, "##krkr", "GPU_DRAW: entered target=%p Opacity=%d MainImage=%p nchild=%d", target, (int)Opacity, MainImage, GetVisibleChildrenCount());
 
 	tTVPRect rctar(rect);
 	rctar.set_offsets(x, y);
@@ -7579,7 +7585,7 @@ TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/loadImages)
 	TJS_GET_NATIVE_INSTANCE(/*var. name*/_this, /*var. type*/tTJSNI_Layer);
 	if(numparams < 1) return TJS_E_BADPARAMCOUNT;
 	ttstr name(*param[0]);
-	tjs_uint32 key = clNone; // TODO Intf‚È‚Ì‚ÉŒÅ—L’l‚ª
+	tjs_uint32 key = clNone; // TODO Intfï¿½È‚Ì‚ÉŒÅ—Lï¿½lï¿½ï¿½
 	if(numparams >=2 && param[1]->Type() != tvtVoid)
 		key = (tjs_uint32)param[1]->AsInteger();
 	iTJSDispatch2 * metainfo = _this->LoadImages(name, key);
@@ -10649,6 +10655,13 @@ TJS_BEGIN_NATIVE_PROP_DECL(provinceImageBufferPitch)
 }
 TJS_END_NATIVE_PROP_DECL(provinceImageBufferPitch)
 //----------------------------------------------------------------------
+// registerExEvent - stub
+TJS_BEGIN_NATIVE_METHOD_DECL(registerExEvent)
+{
+	return TJS_S_OK;
+}
+TJS_END_NATIVE_METHOD_DECL(registerExEvent)
+//----------------------------------------------------------------------
 	TJS_END_NATIVE_MEMBERS
 
 
@@ -10854,6 +10867,10 @@ bool tTJSNI_Font::GetFontFaceIsFileName() const
 //---------------------------------------------------------------------------
 tjs_int tTJSNI_Font::GetTextWidthDirect(const ttstr & text)
 {
+#ifdef KRKR2_SDL_BUILD
+	// SDL: no font files available; return approximate width
+	return text.length() * 24; // ~24px per char
+#else
 	GetCurrentRasterizer()->ApplyFont( Font );
 	tjs_uint width = 0;
 	const tjs_char *buf = text.c_str();
@@ -10865,6 +10882,7 @@ tjs_int tTJSNI_Font::GetTextWidthDirect(const ttstr & text)
 		buf++;
 	}
 	return width;
+#endif
 }
 //---------------------------------------------------------------------------
 tjs_int tTJSNI_Font::GetTextWidth(const ttstr & text)
@@ -10931,8 +10949,12 @@ void tTJSNI_Font::GetFontList(tjs_uint32 flags, std::vector<ttstr> & list)
 //---------------------------------------------------------------------------
 void tTJSNI_Font::MapPrerenderedFont(const ttstr & storage)
 {
+#ifdef KRKR2_SDL_BUILD
+	return; // SDL: skip prerendered fonts
+#else
 	if( Layer ) Layer->MapPrerenderedFont(storage);
 	else TVPMapPrerenderedFont(Font, storage);
+#endif
 }
 //---------------------------------------------------------------------------
 void tTJSNI_Font::UnmapPrerenderedFont()
@@ -11275,7 +11297,7 @@ TJS_END_NATIVE_PROP_DECL(angle)
 //----------------------------------------------------------------------
 TJS_BEGIN_NATIVE_PROP_DECL(faceIsFileName)
 {
-	// Face–¼‚ğƒtƒ@ƒCƒ‹–¼‚Æ‚µ‚ÄŠJ‚­AFreeType‚Å‚Ì‚İ—LŒøB‚½‚¾‚µA‚»‚ÌƒŒƒCƒ„[‚ÅIME‚ğ—LŒø‚µ‚½ê‡“®ì‚Í•s’è
+	// Faceï¿½ï¿½ï¿½ï¿½ï¿½tï¿½@ï¿½Cï¿½ï¿½ï¿½ï¿½ï¿½Æ‚ï¿½ï¿½ÄŠJï¿½ï¿½ï¿½AFreeTypeï¿½Å‚Ì‚İ—Lï¿½ï¿½ï¿½Bï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Aï¿½ï¿½ï¿½Ìƒï¿½ï¿½Cï¿½ï¿½ï¿½[ï¿½ï¿½IMEï¿½ï¿½Lï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ê‡ï¿½ï¿½ï¿½ï¿½Í•sï¿½ï¿½
 	TJS_BEGIN_NATIVE_PROP_GETTER
 	{
 		TJS_GET_NATIVE_INSTANCE(/*var. name*/_this, /*var. type*/tTJSNI_Font);

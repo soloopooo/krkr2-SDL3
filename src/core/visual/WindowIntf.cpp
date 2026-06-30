@@ -300,9 +300,11 @@ void tTJSNI_BaseWindow::SetDrawDeviceObject(const tTJSVariant & val)
 //---------------------------------------------------------------------------
 void tTJSNI_BaseWindow::OnClose()
 {
-	if(!CanDeliverEvents()) return;
+	TVPAddLog(TJS_W("tTJSNI_BaseWindow::OnClose called"));
+	if(!CanDeliverEvents()) { TVPAddLog(TJS_W("tTJSNI_BaseWindow::OnClose CanDeliverEvents false")); return; }
 	if(Owner)
 	{
+		TVPAddLog(TJS_W("tTJSNI_BaseWindow::OnClose posting onCloseQuery event"));
 		tTJSVariant arg[1] = {true};
 		static ttstr eventname(TJS_W("onCloseQuery"));
 		TVPPostEvent(Owner, Owner, eventname, 0, TVP_EPT_IMMEDIATE, 1, arg);

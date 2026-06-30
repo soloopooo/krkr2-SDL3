@@ -20,6 +20,8 @@
 
 #include <zlib.h>
 #include <algorithm>
+#include <android/log.h>
+#define TVP_DEBUG_LOG(msg) __android_log_print(ANDROID_LOG_ERROR, "##krkr", "%s", msg)
 
 bool TVPAllowExtractProtectedStorage = true;
 
@@ -358,14 +360,17 @@ void tTVPXP3Archive::Init(tTJSBinaryStream *st, tjs_int64 off, bool normalizeNam
 
 	TVPAddLog( TVPFormatMessage(TVPInfoTryingToReadXp3VirtualFileSystemInformationFrom, ArchiveName) );
 
+	TVP_DEBUG_LOG("XP3 Init: start");
 	int segmentcount = 0;
 	try
 	{
 		// retrieve archive offset
+		TVP_DEBUG_LOG("XP3 Init: get offset");
 		if(off < 0) TVPGetXP3ArchiveOffset(st, ArchiveName, offset, true);
 
 		// read index position and seek
 		st->SetPosition(11 + offset);
+		TVP_DEBUG_LOG("XP3 Init: reading index");
 
 		// read all XP3 indices
 		while(true)
@@ -531,6 +536,7 @@ void tTVPXP3Archive::Init(tTJSBinaryStream *st, tjs_int64 off, bool normalizeNam
 	}
 	catch(...)
 	{
+		TVP_DEBUG_LOG("XP3 Init: CATCH - exception thrown");
 		if(indexdata) delete [] indexdata;
 		delete st;
  		TVPAddLog( (const tjs_char*)TVPInfoFailed );
@@ -539,6 +545,7 @@ void tTVPXP3Archive::Init(tTJSBinaryStream *st, tjs_int64 off, bool normalizeNam
 	if(indexdata) delete [] indexdata;
 	delete st;
 
+	TVP_DEBUG_LOG("XP3 Init: done successfully");
 	TVPAddLog( TVPFormatMessage( TVPInfoDoneWithContains, ttstr(Count), ttstr(segmentcount) ) );
 }
 

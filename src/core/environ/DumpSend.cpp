@@ -1,8 +1,13 @@
+#ifdef KRKR2_SDL_BUILD
+// Dump sending depends on cocos2d-x network module; no-op on SDL2 variant.
+#else
 #include "network/HttpRequest.h"
 #include "network/HttpClient.h"
 #include "base/CCDirector.h"
 #include "base/CCScheduler.h"
 #include "base/base64.h"
+#endif
+
 #include "Platform.h"
 #include "SysInitIntf.h"
 #include "ConfigManager/LocaleConfigManager.h"
@@ -13,6 +18,7 @@
 #include <iomanip>
 #include <condition_variable>
 
+#ifndef KRKR2_SDL_BUILD
 static void ClearDumps(const std::string &dumpdir, std::vector<std::string> &allDumps) {
 	for (const std::string &path : allDumps) {
 		remove((dumpdir + "/" + path).c_str());
@@ -136,7 +142,7 @@ static void SendDumps(std::string dumpdir, std::vector<std::string> allDumps, st
 			zip_fileinfo zi;
 			memset(&zi, 0, sizeof zi);
 
-			time_t _t = stat_buf.st_mtime;
+			time_t _t = stat_buf.st_mtime_sec;
 			struct tm *time = localtime(&_t);
 			zi.tmz_date.tm_year = time->tm_year;
 			zi.tmz_date.tm_mon = time->tm_mon;
@@ -145,11 +151,11 @@ static void SendDumps(std::string dumpdir, std::vector<std::string> allDumps, st
 			zi.tmz_date.tm_min = time->tm_min;
 			zi.tmz_date.tm_sec = time->tm_sec;
 
-			// CRCÓ‹Ëã
+			// CRCÓ‹ï¿½ï¿½
 			unsigned long crcFile = 0;
 			crcFile = crc32(crcFile, (const Bytef *)&buf[0], buf.size());
-			// ¥Õ¥¡¥¤¥ë¤Î×·¼Ó
-			// UTF8¤Ç¸ñ¼{¤¹¤ë
+			// ï¿½Õ¥ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×·ï¿½ï¿½
+			// UTF8ï¿½Ç¸ï¿½{ï¿½ï¿½ï¿½ï¿½
 			zipFile zf = zipOpen2_64((const void*)filename.c_str(), 0, NULL, GetZlibIOFunc());
 			if (zf == NULL) {
 				break;
@@ -228,3 +234,4 @@ void TVPCheckAndSendDumps(const std::string &dumpdir, const std::string &package
 		}
 	}
 }
+#endif // !KRKR2_SDL_BUILD

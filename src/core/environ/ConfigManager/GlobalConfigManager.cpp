@@ -1,31 +1,11 @@
 #include "GlobalConfigManager.h"
 #include "tinyxml2/tinyxml2.h"
-#include "platform/CCFileUtils.h"
 #include "Platform.h"
 #include "UtilStreams.h"
 #include "LocaleConfigManager.h"
+#include <android/log.h>
 
 bool TVPWriteDataToFile(const ttstr &filepath, const void *data, unsigned int len);
-class XMLMemPrinter : public tinyxml2::XMLPrinter {
-	tTVPMemoryStream _stream;
-	char _buffer[4096];
-public:
-	virtual void Print(const char* format, ...) {
-		va_list param;
-		va_start(param, format);
-		int n = vsnprintf(_buffer, 4096, format, param);
-		va_end(param);
-		_stream.Write(_buffer, n);
-	}
-	void SaveFile(const std::string &path) {
-		if (!TVPWriteDataToFile(path, _stream.GetInternalBuffer(), _stream.GetSize())) {
-			TVPShowSimpleMessageBox(
-				LocaleConfigManager::GetInstance()->GetText("cannot_create_preference"),
-				LocaleConfigManager::GetInstance()->GetText("readonly_storage"));
-		}
-	}
-};
-
 
 GlobalConfigManager::GlobalConfigManager() {
 	Initialize();
@@ -50,6 +30,8 @@ void iSysConfigManager::Initialize() {
 #endif
 
 	if (fp && !doc.LoadFile(fp)) {
+		__android_log_print(ANDROID_LOG_INFO, "##krkr", "Load prefs from %s (%d items)",
+			GetFilePath().c_str(), (int)AllConfig.size());
 		tinyxml2::XMLElement *rootElement = doc.RootElement();
 		if (rootElement) {
 			for (tinyxml2::XMLElement *item = rootElement->FirstChildElement("Item"); item; item = item->NextSiblingElement("Item")) {
@@ -107,9 +89,15 @@ void iSysConfigManager::SaveToFile() {
 		}
 	}
 	doc.LinkEndChild(rootElement);
-	XMLMemPrinter stream;
-	doc.Print(&stream);
-	stream.SaveFile(GetFilePath());
+	tinyxml2::XMLPrinter printer;
+	doc.Print(&printer);
+	if (!TVPWriteDataToFile(filepath, printer.CStr(), printer.CStrSize())) {
+		__android_log_print(ANDROID_LOG_ERROR, "##krkr",
+			"Failed to save preference to %s", filepath.c_str());
+		TVPShowSimpleMessageBox(
+			LocaleConfigManager::GetInstance()->GetText("cannot_create_preference"),
+			LocaleConfigManager::GetInstance()->GetText("readonly_storage"));
+	}
 	ConfigUpdated = false;
 }
 
@@ -179,6 +167,7 @@ void iSysConfigManager::SetValue(const std::string &name, const std::string & va
 
 void iSysConfigManager::SetKeyMap(int k/* 0 means remove */, int v)
 {
+	ConfigUpdated = true;
 	if (v == 0) {
 		KeyMap.erase(k);
 	} else {
@@ -197,4 +186,3 @@ std::vector<std::string> iSysConfigManager::GetCustomArgumentsForPush() {
 	}
 	return ret;
 }
-

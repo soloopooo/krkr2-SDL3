@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	xmlns:app="http://schemas.android.com/apk/res-auto"
+	android:layout_width="match_parent"
+	android:layout_height="56dp"
+	android:orientation="horizontal"
+	android:gravity="center_vertical"
+	android:paddingStart="16dp"
+	android:paddingEnd="8dp"
+	android:background="?attr/selectableItemBackground">
+
+	<LinearLayout
+		android:layout_width="0dp"
+		android:layout_height="wrap_content"
+		android:layout_weight="1"
+		android:orientation="vertical">
+
+		<TextView
+			android:id="@+id/recentName"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:textSize="14sp"
+			android:textColor="?attr/colorOnSurface"
+			android:maxLines="1"
+			android:ellipsize="end" />
+
+		<TextView
+			android:id="@+id/recentPath"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:textSize="11sp"
+			android:textColor="?attr/colorOnSurfaceVariant"
+			android:maxLines="1"
+			android:ellipsize="start" />
+	</LinearLayout>
+
+	<com.google.android.material.button.MaterialButton
+		android:id="@+id/recentPlay"
+		style="@style/Widget.Material3.Button.TextButton"
+		android:layout_width="40dp"
+		android:layout_height="40dp"
+		android:insetTop="0dp"
+		android:insetBottom="0dp"
+		app:icon="@drawable/ic_play_arrow"
+		app:iconSize="20dp"
+		app:iconTint="?attr/colorPrimary" />
+
+	<com.google.android.material.button.MaterialButton
+		android:id="@+id/recentDelete"
+		style="@style/Widget.Material3.Button.TextButton"
+		android:layout_width="40dp"
+		android:layout_height="40dp"
+		android:insetTop="0dp"
+		android:insetBottom="0dp"
+		android:layout_marginStart="4dp"
+		app:icon="@drawable/ic_close"
+		app:iconSize="18dp"
+		app:iconTint="?attr/colorOnSurfaceVariant" />
+</LinearLayout>

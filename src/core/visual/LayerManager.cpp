@@ -21,6 +21,7 @@
 #include "TickCount.h"
 #include "DebugIntf.h"
 #include "LayerTreeOwner.h"
+#include <android/log.h>
 
 
 
@@ -130,8 +131,11 @@ void tTVPLayerManager::DrawCompleted(const tTVPRect &destrect,
 	if (!LayerTreeOwner) return;
 	LayerTreeOwner->NotifyBitmapCompleted(this, destrect.left, destrect.top, bmp, cliprect, type, opacity);
 #else
+		//__android_log_print(ANDROID_LOG_INFO, "##krkr", "LMGR: DrawCompleted dst=(%d,%d-%d,%d) src=%p w=%d h=%d opa=%d",
+		//	destrect.left, destrect.top, destrect.right, destrect.bottom,
+		//	bmp, bmp ? bmp->GetWidth() : 0, bmp ? bmp->GetHeight() : 0, opacity);
     tjs_int w, h;
-	if(!/*LayerTreeOwner->*/GetPrimaryLayerSize(w, h)) return;
+		if(!/*LayerTreeOwner->*/GetPrimaryLayerSize(w, h)) { /*__android_log_print(ANDROID_LOG_INFO, "##krkr", "LMGR: no primary layer size");*/ return; }
     //Window->GetDrawDevice()->GetSrcSize(w, h);
     if (!DrawBuffer) {
         // create draw buffer
@@ -722,7 +726,7 @@ void tTVPLayerManager::SetTouchCapture( tjs_uint32 id, tTJSNI_BaseLayer* layer )
 	std::vector<tTVPTouchCaptureLayer>::iterator itr = std::find_if( TouchCapture.begin(), TouchCapture.end(), pred );
 	if( itr != TouchCapture.end() )
 	{
-		// Šù‚É“¯ˆêID‚Ì‚à‚Ì‚ª‚ ‚éê‡‚ÍA“¯‚¶êŠ‚Å’u‚«Š·‚¦‚é
+		// ï¿½ï¿½ï¿½É“ï¿½ï¿½ï¿½IDï¿½Ì‚ï¿½ï¿½Ì‚ï¿½ï¿½ï¿½ï¿½ï¿½ê‡ï¿½ÍAï¿½ï¿½ï¿½ï¿½ï¿½êŠï¿½Å’uï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 		tTJSNI_BaseLayer* old = itr->Owner;
 		if( old && old->Owner ) old->Owner->Release();
 		itr->Owner = layer;
@@ -730,7 +734,7 @@ void tTVPLayerManager::SetTouchCapture( tjs_uint32 id, tTJSNI_BaseLayer* layer )
 	}
 	else
 	{
-		// ‚È‚¢ê‡‚ÍA––”ö‚É’Ç‰ÁB
+		// ï¿½È‚ï¿½ï¿½ê‡ï¿½ÍAï¿½ï¿½ï¿½ï¿½ï¿½É’Ç‰ï¿½ï¿½B
 		TouchCapture.push_back( tTVPTouchCaptureLayer( id, layer ) );
 		if( layer->Owner ) layer->Owner->AddRef();
 	}
@@ -1146,6 +1150,17 @@ void TJS_INTF_METHOD tTVPLayerManager::DumpLayerStructure()
 
 bool tTVPDestTexture::CopyRect(tjs_int x, tjs_int y, const iTVPBaseBitmap *ref, tTVPRect refrect, tjs_int plane /*= (TVP_BB_COPY_MAIN | TVP_BB_COPY_MASK)*/)
 {
+	// Fast path: full-rect texture pointer swap (works for both software and OGL textures)
+	if (x == 0 && y == 0 && refrect.left == 0 && refrect.top == 0 &&
+		refrect.right == (tjs_int)ref->GetWidth() &&
+		refrect.bottom == (tjs_int)ref->GetHeight() &&
+		(tjs_int)GetWidth() == refrect.right &&
+		(tjs_int)GetHeight() == refrect.bottom)
+	{
+		//__android_log_print(ANDROID_LOG_INFO, "##krkr", "COPYRECT: fast path AssignTexture (DestTexture) srcTex=%p", ref->GetTexture());
+		AssignTexture(ref->GetTexture());
+		return true;
+	}
 	if (HoldAlpha) {
 		return tTVPBaseTexture::CopyRect(x, y, ref, refrect, TVP_BB_COPY_MAIN);
 	} else {

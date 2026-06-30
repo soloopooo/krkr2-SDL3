@@ -290,6 +290,22 @@ build_sdl2()
     popd
 }
 
+build_sdl3()
+{
+    if ! [ -d $SDL3_SRC/build_$PLATFORM ]; then mkdir -p $SDL3_SRC/build_$PLATFORM ;fi
+    
+    pushd $SDL3_SRC/build_$PLATFORM
+    cmake .. -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=MinSizeRel \
+        -DCMAKE_TOOLCHAIN_FILE=$NDK_HOME/build/cmake/android.toolchain.cmake \
+        -DANDROID_PLATFORM=21 -DANDROID_ABI=arm64-v8a \
+        -DANDROID=ON -DCMAKE_SYSTEM_NAME=Linux \
+        -DCMAKE_INSTALL_PREFIX=$PORTBUILD_PATH \
+        -DSDL_HIDAPI=OFF -DSDL_OPENGLES=ON -DSDL_VULKAN=ON \
+        -DSDL_X11=OFF -DSDL_WAYLAND=OFF -DSDL_KMSDRM=OFF
+    make -j$CORE_NUM &&  make install 
+    popd
+}
+
 build_cocos2dx()
 {
     if ! [ -d $COCOS2DX_SRC/platform/build_$PLATFORM ]; then mkdir -p $COCOS2DX_SRC/build_$PLATFORM ;fi
