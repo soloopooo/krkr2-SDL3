@@ -1,12 +1,13 @@
 package com.yuri.kirikiri2;
 
 import android.os.Bundle;
+import android.widget.SeekBar;
 import android.widget.Switch;
+import android.widget.TextView;
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
-import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
 
 import org.xmlpull.v1.XmlPullParser;
@@ -15,15 +16,20 @@ import org.xmlpull.v1.XmlPullParserFactory;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class SettingsActivity extends AppCompatActivity {
 	private Map<String, String> mPrefs = new HashMap<>();
 	private File mPrefFile;
 
-	private Switch mSetShowFps, mSetKeepScreen, mSetHideSysBtn;
-	private MaterialButton mBtnFps, mBtnRenderer;
+	private Switch mSetShowFps, mSetOutputLog, mSetKeepScreen, mSetHideSysBtn, mSetRemLastPath, mSetForceDefFont;
+	private MaterialButton mBtnFps, mBtnRenderer, mBtnMemUsage, mBtnDrawThreads, mBtnTexCompress, mBtnDefFont;
+	private SeekBar mCursorBar;
+	private TextView mCursorVal;
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -35,25 +41,47 @@ public class SettingsActivity extends AppCompatActivity {
 		mPrefFile = getPrefFile();
 
 		mSetShowFps = findViewById(R.id.setShowFps);
+		mSetOutputLog = findViewById(R.id.setOutputLog);
 		mSetKeepScreen = findViewById(R.id.setKeepScreen);
 		mSetHideSysBtn = findViewById(R.id.setHideSysBtn);
+		mSetRemLastPath = findViewById(R.id.setRemLastPath);
+		mSetForceDefFont = findViewById(R.id.setForceDefFont);
 		mBtnFps = findViewById(R.id.setFpsLimit);
 		mBtnRenderer = findViewById(R.id.setRenderer);
+		mBtnMemUsage = findViewById(R.id.setMemUsage);
+		mBtnDrawThreads = findViewById(R.id.setDrawThreads);
+		mBtnTexCompress = findViewById(R.id.setTexCompress);
+		mBtnDefFont = findViewById(R.id.setDefaultFont);
+		mCursorBar = findViewById(R.id.setCursorScale);
+		mCursorVal = findViewById(R.id.setCursorVal);
 
 		loadPrefs();
 
+		mCursorBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+			@Override public void onProgressChanged(SeekBar bar, int p, boolean user) {
+				if (!user) return;
+				float val = p / 20f;
+				mCursorVal.setText(String.format("%.0f%%", val * 100));
+				save("vcursor_scale", String.format("%.2f", val));
+			}
+			@Override public void onStartTrackingTouch(SeekBar bar) {}
+			@Override public void onStopTrackingTouch(SeekBar bar) {}
+		});
+
 		mSetShowFps.setOnCheckedChangeListener((b, v) -> save("showfps", v));
+		mSetOutputLog.setOnCheckedChangeListener((b, v) -> save("outputlog", v));
 		mSetKeepScreen.setOnCheckedChangeListener((b, v) -> save("keep_screen_alive", v));
 		mSetHideSysBtn.setOnCheckedChangeListener((b, v) -> save("hide_android_sys_btn", v));
+		mSetRemLastPath.setOnCheckedChangeListener((b, v) -> save("remember_last_path", v));
+		mSetForceDefFont.setOnCheckedChangeListener((b, v) -> save("force_default_font", v));
 
 		mBtnFps.setOnClickListener(v -> {
-			String[] items = {"15", "30", "45", "60"};
+			String[] items = {"120", "90", "75", "60", "45", "30", "15"};
 			new AlertDialog.Builder(this)
 				.setTitle("FPS Limit")
 				.setItems(items, (d, i) -> {
-					String val = items[i];
-					mBtnFps.setText(val);
-					save("fps_limit", val);
+					mBtnFps.setText(items[i]);
+					save("fps_limit", items[i]);
 				})
 				.show();
 		});
@@ -69,6 +97,111 @@ public class SettingsActivity extends AppCompatActivity {
 				})
 				.show();
 		});
+
+		mBtnMemUsage.setOnClickListener(v -> {
+			String[] items = {"unlimited", "high", "medium", "low"};
+			String[] labels = {"Unlimited", "High", "Medium", "Low"};
+			new AlertDialog.Builder(this)
+				.setTitle("Memory Usage")
+				.setItems(labels, (d, i) -> {
+					mBtnMemUsage.setText(labels[i]);
+					save("memusage", items[i]);
+				})
+				.show();
+		});
+
+		mBtnDrawThreads.setOnClickListener(v -> {
+			String[] items = {"0", "1", "2", "3", "4", "5", "6", "7", "8"};
+			String[] labels = {"Auto", "1", "2", "3", "4", "5", "6", "7", "8"};
+			new AlertDialog.Builder(this)
+				.setTitle("Draw Thread Count")
+				.setItems(labels, (d, i) -> {
+					mBtnDrawThreads.setText(labels[i]);
+					save("software_draw_thread", items[i]);
+				})
+				.show();
+		});
+
+		mBtnTexCompress.setOnClickListener(v -> {
+			String[] items = {"none", "halfline", "lz4", "lz4+tlg5"};
+			String[] labels = {"None", "Half Line", "LZ4", "LZ4+TLG5"};
+			new AlertDialog.Builder(this)
+				.setTitle("Texture Compression")
+				.setItems(labels, (d, i) -> {
+					mBtnTexCompress.setText(labels[i]);
+					save("software_compress_tex", items[i]);
+				})
+				.show();
+		});
+
+		mBtnDefFont.setOnClickListener(v -> showFontPicker());
+	}
+
+	private void showFontPicker() {
+		// Scan system font directories
+		List<String> fontPaths = new ArrayList<>();
+		List<String> fontNames = new ArrayList<>();
+		String[][] fontDirs = {{"/system/fonts"}, {"/system/fonts/"}};
+		scanFonts("/system/fonts", fontPaths, fontNames);
+
+		// Also include bundled fallback font
+		File internal = getExternalFilesDir(null);
+		if (internal != null) {
+			File fallback = new File(internal, "DroidSansFallback.ttf");
+			if (fallback.exists()) {
+				fontPaths.add(fallback.getAbsolutePath());
+				fontNames.add("DroidSansFallback (bundled)");
+			}
+		}
+
+		// Build dialog: "Auto (system default)" + sorted fonts
+		final String[] allPaths = new String[fontPaths.size() + 1];
+		final String[] allLabels = new String[fontNames.size() + 1];
+		allPaths[0] = "";
+		allLabels[0] = "Auto (system default)";
+
+		for (int i = 0; i < fontPaths.size(); i++) {
+			allPaths[i + 1] = fontPaths.get(i);
+			// Use just the filename for display
+			String name = fontNames.get(i);
+			allLabels[i + 1] = name;
+		}
+
+		new AlertDialog.Builder(this)
+			.setTitle("Default Font")
+			.setItems(allLabels, (d, which) -> {
+				String path = allPaths[which];
+				String label = allLabels[which];
+				mBtnDefFont.setText(path.isEmpty() ? "Auto" : label);
+				save("default_font", path);
+			})
+			.show();
+	}
+
+	private void scanFonts(String dirPath, List<String> paths, List<String> names) {
+		File dir = new File(dirPath);
+		if (!dir.isDirectory()) return;
+		File[] files = dir.listFiles();
+		if (files == null) return;
+		for (File f : files) {
+			String n = f.getName().toLowerCase();
+			if (f.isFile() && (n.endsWith(".ttf") || n.endsWith(".ttc") || n.endsWith(".otf"))) {
+				paths.add(f.getAbsolutePath());
+				names.add(f.getName());
+			}
+		}
+		// Sort alphabetically
+		ArrayList<Integer> indices = new ArrayList<>();
+		for (int i = 0; i < names.size(); i++) indices.add(i);
+		Collections.sort(indices, (a, b) -> names.get(a).compareToIgnoreCase(names.get(b)));
+		ArrayList<String> sortedPaths = new ArrayList<>();
+		ArrayList<String> sortedNames = new ArrayList<>();
+		for (int i : indices) {
+			sortedPaths.add(paths.get(i));
+			sortedNames.add(names.get(i));
+		}
+		paths.clear(); paths.addAll(sortedPaths);
+		names.clear(); names.addAll(sortedNames);
 	}
 
 	private File getPrefFile() {
@@ -96,13 +229,44 @@ public class SettingsActivity extends AppCompatActivity {
 			is.close();
 		} catch (Exception ignored) {}
 
-		// Apply to UI
 		mSetShowFps.setChecked(getBool("showfps", false));
+		mSetOutputLog.setChecked(getBool("outputlog", true));
 		mSetKeepScreen.setChecked(getBool("keep_screen_alive", true));
 		mSetHideSysBtn.setChecked(getBool("hide_android_sys_btn", false));
+		mSetRemLastPath.setChecked(getBool("remember_last_path", true));
+		mSetForceDefFont.setChecked(getBool("force_default_font", false));
 		mBtnFps.setText(getStr("fps_limit", "60"));
+
 		String ren = getStr("renderer", "software");
 		mBtnRenderer.setText(ren.equals("vulkan") ? "Vulkan" : "Software");
+
+		String[] memNames = {"unlimited", "high", "medium", "low"};
+		String[] memLabels = {"Unlimited", "High", "Medium", "Low"};
+		String mem = getStr("memusage", "unlimited");
+		mBtnMemUsage.setText(pickLabel(mem, memNames, memLabels));
+
+		String[] thrNames = {"0", "1", "2", "3", "4", "5", "6", "7", "8"};
+		String[] thrLabels = {"Auto", "1", "2", "3", "4", "5", "6", "7", "8"};
+		String thr = getStr("software_draw_thread", "0");
+		mBtnDrawThreads.setText(pickLabel(thr, thrNames, thrLabels));
+
+		String[] texNames = {"none", "halfline", "lz4", "lz4+tlg5"};
+		String[] texLabels = {"None", "Half Line", "LZ4", "LZ4+TLG5"};
+		mBtnTexCompress.setText(pickLabel(getStr("software_compress_tex", "none"), texNames, texLabels));
+
+		String font = getStr("default_font", "");
+		if (font.isEmpty()) mBtnDefFont.setText("Auto");
+		else mBtnDefFont.setText(new File(font).getName());
+
+		float cursor = Float.parseFloat(getStr("vcursor_scale", "0.5"));
+		mCursorBar.setProgress(Math.round(cursor * 20));
+		mCursorVal.setText(String.format("%.0f%%", cursor * 100));
+	}
+
+	private static String pickLabel(String value, String[] values, String[] labels) {
+		for (int i = 0; i < values.length; i++)
+			if (values[i].equals(value)) return labels[i];
+		return labels[0];
 	}
 
 	private boolean getBool(String key, boolean def) {

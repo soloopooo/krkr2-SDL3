@@ -935,12 +935,16 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
                     mDebugOverlay.setTextColor(Color.argb(220, 255, 255, 255));
                     mDebugOverlay.setTextSize(12);
                     mDebugOverlay.setShadowLayer(2, 1, 1, Color.argb(200, 0, 0, 0));
-                    mDebugOverlay.setPadding(12, 12, 12, 12);
+                    mDebugOverlay.setPadding(8, 8, 8, 8);
+                    mDebugOverlay.setShadowLayer(3, 1, 1, Color.argb(200, 0, 0, 0));
                     mDebugOverlay.setVisibility(View.GONE);
                     FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.WRAP_CONTENT,
                         FrameLayout.LayoutParams.WRAP_CONTENT);
                     lp.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
+                    // inset from screen rounded corners
+                    float density = sInstance.getResources().getDisplayMetrics().density;
+                    lp.setMargins((int)(20 * density + 0.5f), (int)(20 * density + 0.5f), 0, 0);
                     mDebugOverlay.setLayoutParams(lp);
                     sInstance.mLayout.addView(mDebugOverlay);
                 }

@@ -20,9 +20,9 @@
 			style="@style/Widget.Material3.Button.TextButton"
 			android:layout_width="40dp"
 			android:layout_height="40dp"
-			android:text="←"
-			android:textSize="20sp"
-			android:textColor="@color/on_primary"
+			app:icon="@drawable/ic_close"
+			app:iconSize="20dp"
+			app:iconTint="@color/on_primary"
 			android:insetTop="0dp"
 			android:insetBottom="0dp" />
 
@@ -63,8 +63,15 @@
 				android:layout_height="48dp"
 				android:text="Show FPS"
 				android:textSize="14sp"
-				android:gravity="center_vertical"
-				android:showText="false" />
+				android:gravity="center_vertical" />
+
+			<Switch
+				android:id="@+id/setOutputLog"
+				android:layout_width="match_parent"
+				android:layout_height="48dp"
+				android:text="Output Log"
+				android:textSize="14sp"
+				android:gravity="center_vertical" />
 
 			<Switch
 				android:id="@+id/setKeepScreen"
@@ -81,6 +88,36 @@
 				android:text="Hide System Buttons"
 				android:textSize="14sp"
 				android:gravity="center_vertical" />
+
+			<Switch
+				android:id="@+id/setRemLastPath"
+				android:layout_width="match_parent"
+				android:layout_height="48dp"
+				android:text="Remember Last Path"
+				android:textSize="14sp"
+				android:gravity="center_vertical" />
+
+			<LinearLayout
+				android:layout_width="match_parent"
+				android:layout_height="48dp"
+				android:gravity="center_vertical"
+				android:orientation="horizontal">
+
+				<TextView
+					android:layout_width="0dp"
+					android:layout_height="wrap_content"
+					android:layout_weight="1"
+					android:text="Memory Usage"
+					android:textSize="14sp" />
+
+				<com.google.android.material.button.MaterialButton
+					android:id="@+id/setMemUsage"
+					style="@style/Widget.Material3.Button.OutlinedButton"
+					android:layout_width="wrap_content"
+					android:layout_height="36dp"
+					android:text="Unlimited"
+					android:textSize="13sp" />
+			</LinearLayout>
 
 			<TextView
 				android:layout_width="match_parent"
@@ -135,6 +172,134 @@
 					android:text="Software"
 					android:textSize="13sp" />
 			</LinearLayout>
+
+			<LinearLayout
+				android:layout_width="match_parent"
+				android:layout_height="48dp"
+				android:gravity="center_vertical"
+				android:orientation="horizontal">
+
+				<TextView
+					android:layout_width="0dp"
+					android:layout_height="wrap_content"
+					android:layout_weight="1"
+					android:text="Draw Threads"
+					android:textSize="14sp" />
+
+				<com.google.android.material.button.MaterialButton
+					android:id="@+id/setDrawThreads"
+					style="@style/Widget.Material3.Button.OutlinedButton"
+					android:layout_width="wrap_content"
+					android:layout_height="36dp"
+					android:text="Auto"
+					android:textSize="13sp" />
+			</LinearLayout>
+
+			<LinearLayout
+				android:layout_width="match_parent"
+				android:layout_height="48dp"
+				android:gravity="center_vertical"
+				android:orientation="horizontal">
+
+				<TextView
+					android:layout_width="0dp"
+					android:layout_height="wrap_content"
+					android:layout_weight="1"
+					android:text="Tex Compression"
+					android:textSize="14sp" />
+
+				<com.google.android.material.button.MaterialButton
+					android:id="@+id/setTexCompress"
+					style="@style/Widget.Material3.Button.OutlinedButton"
+					android:layout_width="wrap_content"
+					android:layout_height="36dp"
+					android:text="None"
+					android:textSize="13sp" />
+			</LinearLayout>
+
+			<TextView
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:text="Font"
+				android:textSize="13sp"
+				android:textColor="?attr/colorPrimary"
+				android:textStyle="bold"
+				android:paddingTop="16dp"
+				android:paddingBottom="8dp" />
+
+			<Switch
+				android:id="@+id/setForceDefFont"
+				android:layout_width="match_parent"
+				android:layout_height="48dp"
+				android:text="Force Default Font"
+				android:textSize="14sp"
+				android:gravity="center_vertical" />
+
+			<LinearLayout
+				android:layout_width="match_parent"
+				android:layout_height="48dp"
+				android:gravity="center_vertical"
+				android:orientation="horizontal">
+
+				<TextView
+					android:layout_width="0dp"
+					android:layout_height="wrap_content"
+					android:layout_weight="1"
+					android:text="Default Font"
+					android:textSize="14sp" />
+
+				<com.google.android.material.button.MaterialButton
+					android:id="@+id/setDefaultFont"
+					style="@style/Widget.Material3.Button.OutlinedButton"
+					android:layout_width="wrap_content"
+					android:layout_height="36dp"
+					android:text="Auto"
+					android:textSize="12sp"
+					android:ellipsize="start"
+					android:maxLines="1" />
+			</LinearLayout>
+
+			<TextView
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:text="Controls"
+				android:textSize="13sp"
+				android:textColor="?attr/colorPrimary"
+				android:textStyle="bold"
+				android:paddingTop="16dp"
+				android:paddingBottom="8dp" />
+
+			<LinearLayout
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:gravity="center_vertical"
+				android:orientation="horizontal"
+				android:paddingBottom="8dp">
+
+				<TextView
+					android:layout_width="0dp"
+					android:layout_height="wrap_content"
+					android:layout_weight="1"
+					android:text="Virtual Cursor Size"
+					android:textSize="14sp" />
+
+				<TextView
+					android:id="@+id/setCursorVal"
+					android:layout_width="36dp"
+					android:layout_height="wrap_content"
+					android:gravity="center"
+					android:textSize="13sp"
+					android:textColor="?attr/colorPrimary" />
+			</LinearLayout>
+
+			<SeekBar
+				android:id="@+id/setCursorScale"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:max="20"
+				android:progress="10"
+				android:paddingStart="8dp"
+				android:paddingEnd="8dp" />
 
 		</LinearLayout>
 	</ScrollView>

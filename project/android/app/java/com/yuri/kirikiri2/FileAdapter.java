@@ -14,14 +14,21 @@ import java.util.List;
 class FileAdapter extends RecyclerView.Adapter<FileAdapter.ViewHolder> {
 	private List<FileEntry> mFiles;
 	private OnFileClickListener mListener;
+	private OnFileLongClickListener mLongListener;
 
 	interface OnFileClickListener {
 		void onFileClick(FileEntry entry);
 	}
 
-	FileAdapter(List<FileEntry> files, OnFileClickListener listener) {
+	interface OnFileLongClickListener {
+		void onFileLongClick(FileEntry entry, int position);
+	}
+
+	FileAdapter(List<FileEntry> files, OnFileClickListener listener,
+			OnFileLongClickListener longListener) {
 		mFiles = files;
 		mListener = listener;
+		mLongListener = longListener;
 	}
 
 	void setFiles(List<FileEntry> files) {
@@ -56,6 +63,13 @@ class FileAdapter extends RecyclerView.Adapter<FileAdapter.ViewHolder> {
 		}
 		h.badge.setVisibility(e.isGame ? View.VISIBLE : View.GONE);
 		h.itemView.setOnClickListener(v -> mListener.onFileClick(e));
+		h.itemView.setOnLongClickListener(v -> {
+			if (mLongListener != null) {
+				mLongListener.onFileLongClick(e, h.getAdapterPosition());
+				return true;
+			}
+			return false;
+		});
 	}
 
 	@Override

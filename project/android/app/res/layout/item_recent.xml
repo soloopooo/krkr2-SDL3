@@ -43,7 +43,7 @@
 		android:insetBottom="0dp"
 		app:icon="@drawable/ic_play_arrow"
 		app:iconSize="20dp"
-		app:iconTint="?attr/colorPrimary" />
+		app:iconTint="@color/primary" />
 
 	<com.google.android.material.button.MaterialButton
 		android:id="@+id/recentDelete"
@@ -55,5 +55,5 @@
 		android:layout_marginStart="4dp"
 		app:icon="@drawable/ic_close"
 		app:iconSize="18dp"
-		app:iconTint="?attr/colorOnSurfaceVariant" />
+		app:iconTint="@color/on_surface_variant" />
 </LinearLayout>

@@ -290,6 +290,8 @@ static pthread_key_t mThreadKey;
 static pthread_once_t key_once = PTHREAD_ONCE_INIT;
 static JavaVM *mJavaVM = NULL;
 
+void SDL_AndroidSetJavaVM(void *vm) { mJavaVM = (JavaVM *)vm; }
+
 /* Main activity */
 static jclass mActivityClass;
 

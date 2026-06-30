@@ -1,13 +1,18 @@
 package com.yuri.kirikiri2;
 
+import android.app.AlertDialog;
+import android.app.ProgressDialog;
 import android.content.Intent;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.view.View;
+import android.widget.EditText;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
+import android.widget.PopupMenu;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
@@ -21,6 +26,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -38,6 +44,13 @@ public class LauncherActivity extends AppCompatActivity {
 	private List<String> mRecentPaths = new ArrayList<>();
 	private static final int MAX_RECENT = 20;
 
+	// Clipboard for copy/cut
+	private static class ClipData {
+		File source;
+		boolean isCut; // false = copy, true = cut (move)
+	}
+	private ClipData mClipboard;
+
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
@@ -51,14 +64,17 @@ public class LauncherActivity extends AppCompatActivity {
 		mBreadcrumbScroll = findViewById(R.id.breadcrumbScroll);
 		mRecentCard = findViewById(R.id.recentCard);
 
-		mAdapter = new FileAdapter(mFiles, entry -> {
-			if (entry.isDirectory) {
-				loadDir(new File(entry.fullPath));
-			} else if (entry.isGame) {
-				addRecent(entry.fullPath);
-				startGame(entry.fullPath);
-			}
-		});
+		mAdapter = new FileAdapter(mFiles,
+			entry -> {
+				if (entry.isDirectory) {
+					loadDir(new File(entry.fullPath));
+				} else if (entry.isGame) {
+					addRecent(entry.fullPath);
+					startGame(entry.fullPath);
+				}
+			},
+			(entry, pos) -> showFileMenu(entry, pos)
+		);
 
 		mFileList = findViewById(R.id.fileList);
 		mFileList.setLayoutManager(new LinearLayoutManager(this));
@@ -98,8 +114,12 @@ public class LauncherActivity extends AppCompatActivity {
 		// Start at /storage/emulated/0 or fallback to internal
 		File defaultDir = new File("/storage/emulated/0");
 		if (!defaultDir.isDirectory()) defaultDir = getExternalFilesDir(null);
-		loadDir(defaultDir);
+		if (defaultDir != null) loadDir(defaultDir);
 	}
+
+	//--------------------------------------------------------------------------
+	// Directory navigation
+	//--------------------------------------------------------------------------
 
 	private void loadDir(File dir) {
 		if (!dir.isDirectory()) return;
@@ -111,7 +131,6 @@ public class LauncherActivity extends AppCompatActivity {
 	private void updateBreadcrumbs(File dir) {
 		mBreadcrumbContainer.removeAllViews();
 
-		// Build path segments
 		List<String> segments = new ArrayList<>();
 		List<File> dirs = new ArrayList<>();
 		File cur = dir;
@@ -126,7 +145,6 @@ public class LauncherActivity extends AppCompatActivity {
 			cur = cur.getParentFile();
 		}
 
-		// Friendly names for known storage roots
 		String abs = dir.getAbsolutePath();
 		if (abs.startsWith("/storage/emulated/0") && segments.size() >= 1) {
 			segments.set(0, abs.equals("/storage/emulated/0") ? "Internal storage" : "Internal");
@@ -170,15 +188,285 @@ public class LauncherActivity extends AppCompatActivity {
 			mBreadcrumbContainer.addView(tv);
 		}
 
-		// Auto-scroll to end (show deepest level)
 		mBreadcrumbScroll.post(() -> mBreadcrumbScroll.fullScroll(HorizontalScrollView.FOCUS_RIGHT));
 	}
+
+	//--------------------------------------------------------------------------
+	// Game launch
+	//--------------------------------------------------------------------------
 
 	private void startGame(String path) {
 		Intent intent = new Intent(this, MainActivity.class);
 		intent.putExtra("startupPath", path);
 		startActivity(intent);
 	}
+
+	//--------------------------------------------------------------------------
+	// Long-press file context menu
+	//--------------------------------------------------------------------------
+
+	private void showFileMenu(FileEntry entry, int position) {
+		PopupMenu popup = new PopupMenu(this, mFileList.findViewHolderForLayoutPosition(position).itemView);
+		popup.getMenu().add(0, 1, 0, "Copy");
+		popup.getMenu().add(0, 2, 0, "Cut");
+		popup.getMenu().add(0, 3, 0, "Delete");
+		popup.getMenu().add(0, 4, 0, "Rename");
+
+		if (entry.isGame) {
+			popup.getMenu().add(0, 7, 0, "Play");
+		}
+
+		String lower = entry.name.toLowerCase();
+		if (!entry.isDirectory && (lower.endsWith(".xp3") || lower.endsWith(".xp4"))) {
+			popup.getMenu().add(0, 5, 0, "Extract XP3");
+		}
+
+		if (mClipboard != null) {
+			popup.getMenu().add(0, 6, 0, "Paste");
+		}
+
+		popup.setOnMenuItemClickListener(item -> {
+			switch (item.getItemId()) {
+				case 1: copyFile(new File(entry.fullPath), false); return true;
+				case 2: copyFile(new File(entry.fullPath), true); return true;
+				case 3: deleteFile(new File(entry.fullPath)); return true;
+				case 4: renameFile(new File(entry.fullPath)); return true;
+				case 5: extractXP3(new File(entry.fullPath)); return true;
+				case 6: pasteFiles(); return true;
+				case 7:
+					addRecent(entry.fullPath);
+					startGame(entry.fullPath);
+					return true;
+			}
+			return false;
+		});
+		popup.show();
+	}
+
+	//--------------------------------------------------------------------------
+	// Clipboard
+	//--------------------------------------------------------------------------
+
+	private void copyFile(File file, boolean cut) {
+		mClipboard = new ClipData();
+		mClipboard.source = file;
+		mClipboard.isCut = cut;
+		Toast.makeText(this, (cut ? "Cut" : "Copy") + ": " + file.getName(), Toast.LENGTH_SHORT).show();
+	}
+
+	private void pasteFiles() {
+		if (mClipboard == null || mCurrentDir == null) return;
+		final File src = mClipboard.source;
+		final File dst = new File(mCurrentDir, src.getName());
+
+		if (src.equals(dst)) {
+			Toast.makeText(this, "Same location", Toast.LENGTH_SHORT).show();
+			return;
+		}
+
+		new AsyncTask<Void, Void, Boolean>() {
+			private String mError;
+			private ProgressDialog pd;
+			@Override
+			protected void onPreExecute() {
+				pd = new ProgressDialog(LauncherActivity.this);
+				pd.setMessage(mClipboard.isCut ? "Moving..." : "Copying...");
+				pd.setIndeterminate(true);
+				pd.setCancelable(false);
+				pd.show();
+			}
+			@Override
+			protected Boolean doInBackground(Void... v) {
+				try {
+					if (mClipboard.isCut) {
+						if (!src.renameTo(dst)) {
+							copyFileRecursive(src, dst);
+							deleteRecursive(src);
+						}
+					} else {
+						copyFileRecursive(src, dst);
+					}
+					return true;
+				} catch (Exception e) {
+					mError = e.getMessage();
+					return false;
+				}
+			}
+			@Override
+			protected void onPostExecute(Boolean ok) {
+				pd.dismiss();
+				if (ok) {
+					Toast.makeText(LauncherActivity.this, "Done", Toast.LENGTH_SHORT).show();
+					if (mClipboard.isCut) mClipboard = null;
+					loadDir(mCurrentDir);
+				} else {
+					Toast.makeText(LauncherActivity.this, "Error: " + mError, Toast.LENGTH_LONG).show();
+				}
+			}
+		}.execute();
+	}
+
+	//--------------------------------------------------------------------------
+	// Delete
+	//--------------------------------------------------------------------------
+
+	private void deleteFile(final File file) {
+		new AlertDialog.Builder(this)
+			.setTitle("Delete")
+			.setMessage("Delete " + file.getName() + "?")
+			.setPositiveButton("Delete", (d, w) -> {
+				new AsyncTask<Void, Void, Boolean>() {
+					private ProgressDialog pd;
+					@Override
+					protected void onPreExecute() {
+						pd = new ProgressDialog(LauncherActivity.this);
+						pd.setMessage("Deleting...");
+						pd.setIndeterminate(true);
+						pd.setCancelable(false);
+						pd.show();
+					}
+					@Override
+					protected Boolean doInBackground(Void... v) {
+						return deleteRecursive(file);
+					}
+					@Override
+					protected void onPostExecute(Boolean ok) {
+						pd.dismiss();
+						if (ok) loadDir(mCurrentDir);
+						else Toast.makeText(LauncherActivity.this, "Delete failed", Toast.LENGTH_SHORT).show();
+					}
+				}.execute();
+			})
+			.setNegativeButton("Cancel", null)
+			.show();
+	}
+
+	//--------------------------------------------------------------------------
+	// Rename
+	//--------------------------------------------------------------------------
+
+	private void renameFile(final File file) {
+		final EditText input = new EditText(this);
+		input.setText(file.getName());
+		input.setSelection(0, file.getName().lastIndexOf('.') > 0 ?
+			file.getName().lastIndexOf('.') : file.getName().length());
+
+		new AlertDialog.Builder(this)
+			.setTitle("Rename")
+			.setView(input)
+			.setPositiveButton("Rename", (d, w) -> {
+				String newName = input.getText().toString().trim();
+				if (newName.isEmpty()) return;
+				File dst = new File(file.getParent(), newName);
+				if (file.renameTo(dst)) {
+					loadDir(mCurrentDir);
+				} else {
+					Toast.makeText(this, "Rename failed", Toast.LENGTH_SHORT).show();
+				}
+			})
+			.setNegativeButton("Cancel", null)
+			.show();
+	}
+
+	//--------------------------------------------------------------------------
+	// XP3 extraction
+	//--------------------------------------------------------------------------
+
+	private void extractXP3(final File xp3File) {
+		final ProgressDialog pd = new ProgressDialog(this);
+		pd.setTitle("Extracting XP3");
+		pd.setMessage("Parsing...");
+		pd.setIndeterminate(false);
+		pd.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
+		pd.setCancelable(false);
+		pd.setMax(100);
+		pd.show();
+
+		new AsyncTask<Void, Integer, Boolean>() {
+			private String mError;
+			@Override
+			protected Boolean doInBackground(Void... v) {
+				try {
+					android.util.Log.i("XP3Extract", "Starting extraction of " + xp3File.getName());
+
+					List<XP3Extractor.Entry> entries = XP3Extractor.listEntries(xp3File);
+					android.util.Log.i("XP3Extract", "listEntries returned " + entries.size());
+
+					if (entries.isEmpty()) {
+						mError = "No files found in archive";
+						return false;
+					}
+
+					File outDir = new File(xp3File.getParent(),
+						xp3File.getName().replaceAll("(?i)\\.xp[34]$", "") + "_unpacked");
+
+					XP3Extractor.extract(xp3File, outDir, entries, (fileName, cur, total) -> {
+						publishProgress(cur, total);
+					});
+					return true;
+				} catch (Throwable t) {
+					mError = t.getMessage();
+					if (mError == null) mError = t.toString();
+					android.util.Log.e("XP3Extract", "extract failed", t);
+					return false;
+				}
+			}
+			@Override
+			protected void onProgressUpdate(Integer... v) {
+				pd.setProgress(v[0]);
+				pd.setMax(v[1]);
+			}
+			@Override
+			protected void onPostExecute(Boolean ok) {
+				pd.dismiss();
+				if (ok) {
+					Toast.makeText(LauncherActivity.this, "Extracted to " +
+						xp3File.getName().replaceAll("(?i)\\.xp[34]$", "") + "_unpacked",
+						Toast.LENGTH_LONG).show();
+					loadDir(mCurrentDir);
+				} else {
+					Toast.makeText(LauncherActivity.this,
+						"Extract failed: " + (mError != null ? mError : "unknown"),
+						Toast.LENGTH_LONG).show();
+				}
+			}
+		}.execute();
+	}
+
+	//--------------------------------------------------------------------------
+	// File I/O utilities
+	//--------------------------------------------------------------------------
+
+	private static boolean deleteRecursive(File f) {
+		if (f.isDirectory()) {
+			File[] children = f.listFiles();
+			if (children != null)
+				for (File c : children) deleteRecursive(c);
+		}
+		return f.delete();
+	}
+
+	private static void copyFileRecursive(File src, File dst) throws Exception {
+		if (src.isDirectory()) {
+			dst.mkdirs();
+			File[] children = src.listFiles();
+			if (children != null)
+				for (File c : children)
+					copyFileRecursive(c, new File(dst, c.getName()));
+		} else {
+			dst.getParentFile().mkdirs();
+			try (FileInputStream fis = new FileInputStream(src);
+				 FileOutputStream fos = new FileOutputStream(dst);
+				 FileChannel in = fis.getChannel();
+				 FileChannel out = fos.getChannel()) {
+				in.transferTo(0, in.size(), out);
+			}
+		}
+	}
+
+	//--------------------------------------------------------------------------
+	// About dialog
+	//--------------------------------------------------------------------------
 
 	private void showAboutDialog() {
 		String ver;
@@ -187,12 +475,16 @@ public class LauncherActivity extends AppCompatActivity {
 		} catch (Exception e) {
 			ver = "?";
 		}
-		new androidx.appcompat.app.AlertDialog.Builder(this)
+		new AlertDialog.Builder(this)
 			.setTitle("Kirikiroid2-Yuri")
 			.setMessage("Version: " + ver + "\n\nSDL3 + Vulkan rendering backend\nNative Android launcher")
 			.setPositiveButton("OK", null)
 			.show();
 	}
+
+	//--------------------------------------------------------------------------
+	// Lifecycle
+	//--------------------------------------------------------------------------
 
 	@Override
 	protected void onResume() {
@@ -288,10 +580,17 @@ public class LauncherActivity extends AppCompatActivity {
 		@Override
 		protected List<FileEntry> doInBackground(File... dirs) {
 			File dir = dirs[0];
+			android.util.Log.i("Launcher", "LoadTask start: " + dir.getAbsolutePath());
+			long t0 = System.currentTimeMillis();
 			List<FileEntry> result = new ArrayList<>();
 			File[] children = dir.listFiles();
-			if (children == null) return result;
+			if (children == null) {
+				android.util.Log.w("Launcher", "LoadTask: listFiles returned null");
+				return result;
+			}
+			android.util.Log.i("Launcher", "LoadTask: " + children.length + " entries");
 
+			int count = 0, gameCount = 0;
 			for (File f : children) {
 				String name = f.getName();
 				if (name.startsWith(".")) continue;
@@ -304,11 +603,17 @@ public class LauncherActivity extends AppCompatActivity {
 
 				if (e.isDirectory) {
 					e.isGame = f.canRead() && new File(f, "startup.tjs").exists();
-				} else {
+				} else if (isBootableFile(f)) {
 					String lower = name.toLowerCase();
-					e.isGame = lower.endsWith(".xp3") || lower.endsWith(".xp4");
+					if (lower.endsWith(".xp3") || lower.endsWith(".xp4")) {
+						e.isGame = XP3Extractor.hasStartupScript(f);
+					} else {
+						e.isGame = true; // exe — trust header check
+					}
 				}
+				if (e.isGame) gameCount++;
 				result.add(e);
+				count++;
 			}
 
 			Collections.sort(result, (a, b) -> {
@@ -316,6 +621,8 @@ public class LauncherActivity extends AppCompatActivity {
 					return a.isDirectory ? -1 : 1;
 				return a.name.compareToIgnoreCase(b.name);
 			});
+			long dt = System.currentTimeMillis() - t0;
+			android.util.Log.i("Launcher", "LoadTask done: " + count + " items (" + gameCount + " games) in " + dt + "ms");
 			return result;
 		}
 
@@ -324,5 +631,43 @@ public class LauncherActivity extends AppCompatActivity {
 			mFiles = result;
 			mAdapter.setFiles(result);
 		}
+	}
+
+	/** Check if a file is a bootable archive (XP3, or EXE with embedded XP3). */
+	private static boolean isBootableFile(File f) {
+		String name = f.getName().toLowerCase();
+		if (name.endsWith(".xp3") || name.endsWith(".xp4")) return true;
+
+		// Check magic bytes for EXE with embedded XP3
+		try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(f, "r")) {
+			byte[] magic = { 'X', 'P', '3', 0x0D, 0x0A, 0x20, 0x0A, 0x1A, (byte)0x8B, (byte)0x67, 0x01 };
+			byte[] header = new byte[11];
+			if (raf.read(header) < 11) return false;
+
+			// Check for plain XP3
+			boolean match = true;
+			for (int i = 0; i < 11; i++)
+				if (header[i] != magic[i]) { match = false; break; }
+			if (match) return true;
+
+			// Check for MZ (exe) — scan at 16-byte alignment for XP3 magic
+			if (header[0] == 'M' && header[1] == 'Z') {
+				byte[] buf = new byte[256 * 1024];
+				long fileLen = f.length();
+				long limit = Math.min(fileLen, 50L * 1024 * 1024);
+				for (long base = 16; base < limit; base += buf.length) {
+					int remaining = (int) Math.min(buf.length, limit - base);
+					raf.seek(base);
+					raf.readFully(buf, 0, remaining);
+					for (int i = 0; i <= remaining - 11; i += 16) {
+						boolean found = true;
+						for (int j = 0; j < 11; j++)
+							if (buf[i + j] != magic[j]) { found = false; break; }
+						if (found) return true;
+					}
+				}
+			}
+		} catch (Exception ignored) {}
+		return false;
 	}
 }
