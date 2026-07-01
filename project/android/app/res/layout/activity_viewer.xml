@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	xmlns:app="http://schemas.android.com/apk/res-auto"
+	android:layout_width="match_parent"
+	android:layout_height="match_parent"
+	android:orientation="vertical"
+	android:background="?attr/colorSurface">
+
+	<com.google.android.material.appbar.MaterialToolbar
+		android:id="@+id/viewerToolbar"
+		android:layout_width="match_parent"
+		android:layout_height="?attr/actionBarSize"
+		android:background="?attr/colorPrimary"
+		app:titleTextColor="@color/on_primary"
+		app:navigationIcon="@drawable/ic_close"
+		app:navigationIconTint="@color/on_primary"
+		app:navigationContentDescription="Back" />
+
+	<ScrollView
+		android:id="@+id/textScroll"
+		android:layout_width="match_parent"
+		android:layout_height="match_parent"
+		android:padding="16dp"
+		android:visibility="gone">
+
+		<TextView
+			android:id="@+id/viewerText"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:typeface="monospace"
+			android:textSize="12sp"
+			android:textColor="?attr/colorOnSurface"
+			android:lineSpacingExtra="2sp" />
+	</ScrollView>
+
+	<ImageView
+		android:id="@+id/viewerImage"
+		android:layout_width="match_parent"
+		android:layout_height="match_parent"
+		android:scaleType="fitCenter"
+		android:adjustViewBounds="true"
+		android:visibility="gone" />
+</LinearLayout>

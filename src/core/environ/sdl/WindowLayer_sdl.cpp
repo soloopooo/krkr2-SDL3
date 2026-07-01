@@ -64,6 +64,7 @@ void TVPForceSwapBuffer() {} // No-op: display updates per-frame
 static tjs_uint8 s_Scancode[0x200];
 static tjs_uint16 s_Keymap[0x200];
 int s_ScreenWidth = 0, s_ScreenHeight = 0;
+int g_bufferOffsetX = 0; // pixel read offset from buffer centering (lockTouchSize)
 
 TVPWindowLayerSDL *TVPWindowLayerSDL::s_ActiveWindow = nullptr;
 TVPWindowLayerSDL *TVPWindowLayerSDL::s_LastWindow = nullptr;
@@ -87,7 +88,18 @@ TVPWindowLayerSDL::~TVPWindowLayerSDL() {
 	if (s_ActiveWindow == this) s_ActiveWindow = m_Prev ? m_Prev : m_Next;
 }
 
-void TVPWindowLayerSDL::SetPaintBoxSize(tjs_int w, tjs_int h) { m_Width = w; m_Height = h; }
+// Fixed game resolution (set once from initial TJS Window constructor, never changes)
+static int s_fixedGameW = 0, s_fixedGameH = 0;
+
+void TVPWindowLayerSDL::SetPaintBoxSize(tjs_int w, tjs_int h) {
+	if (g_gameW <= 0) {
+		g_gameW = w; g_gameH = h;
+		if (s_fixedGameW <= 0) { s_fixedGameW = w; s_fixedGameH = h; }
+		m_Width = w; m_Height = h;
+	} else {
+		m_Width = g_gameW; m_Height = g_gameH;
+	}
+}
 bool TVPWindowLayerSDL::GetFormEnabled() { return m_Visible; }
 void TVPWindowLayerSDL::SetDefaultMouseCursor() {}
 void TVPWindowLayerSDL::GetCursorPos(tjs_int &x, tjs_int &y) { x = m_LastMouseX; y = m_LastMouseY; }
@@ -114,9 +126,9 @@ bool TVPWindowLayerSDL::GetVisible() { return m_Visible; }
 void TVPWindowLayerSDL::SetVisible(bool b) { m_Visible = b; if (b) BringToFront(); }
 const char *TVPWindowLayerSDL::GetCaption() { return m_Caption.c_str(); }
 void TVPWindowLayerSDL::SetCaption(const std::string &s) { m_Caption = s; }
-void TVPWindowLayerSDL::SetWidth(tjs_int w) { m_Width = w; }
-void TVPWindowLayerSDL::SetHeight(tjs_int h) { m_Height = h; }
-void TVPWindowLayerSDL::SetSize(tjs_int w, tjs_int h) { m_Width = w; m_Height = h; }
+void TVPWindowLayerSDL::SetWidth(tjs_int w) { if (g_gameW > 0) w = g_gameW; m_Width = w; }
+void TVPWindowLayerSDL::SetHeight(tjs_int h) { if (g_gameH > 0) h = g_gameH; m_Height = h; }
+void TVPWindowLayerSDL::SetSize(tjs_int w, tjs_int h) { SetPaintBoxSize(w, h); }
 void TVPWindowLayerSDL::GetSize(tjs_int &w, tjs_int &h) { w = m_Width; h = m_Height; }
 tjs_int TVPWindowLayerSDL::GetWidth() const { return m_Width; }
 tjs_int TVPWindowLayerSDL::GetHeight() const { return m_Height; }
@@ -206,7 +218,7 @@ void TVPWindowLayerSDL::GenerateMouseEvent(bool fl, bool fr, bool fu, bool fd) {
 //------------------------------------------------------------------------------
 iWindowLayer *TVPCreateAndAddWindow(tTJSNI_Window *w) {
 	auto *win = new TVPWindowLayerSDL(w);
-	if (s_ScreenWidth > 0 && s_ScreenHeight > 0) win->SetPaintBoxSize(s_ScreenWidth, s_ScreenHeight);
+	// Paint box will be set by TJS Window constructor
 	return win;
 }
 void TVPRemoveWindowLayer(iWindowLayer *lay) { delete static_cast<TVPWindowLayerSDL *>(lay); }
@@ -464,8 +476,27 @@ void TVPEngineTick() {
 	}
 
 	::Application->Run();
+	// After compositing, force locked size to game resolution (overrides TJS lockTouchSize)
+	if (s_fixedGameW > 0) {
+		TVPWindowLayerSDL *swin = TVPWindowLayerSDL::GetActiveWindow();
+		if (swin) {
+			tTJSNI_Window *wjs = swin->GetWindow();
+			iTVPDrawDevice *dd = wjs ? wjs->GetDrawDevice() : nullptr;
+			if (dd) static_cast<tTVPDrawDevice*>(dd)->SetLockedSize(s_fixedGameW, s_fixedGameH);
+		}
+	}
 	iTVPTexture2D::RecycleProcess();
 	TVPDeliverWindowUpdateEvents();
+
+	// Force locked size to game resolution (overrides TJS lockTouchSize)
+	if (s_fixedGameW > 0) {
+		TVPWindowLayerSDL *swin = TVPWindowLayerSDL::GetActiveWindow();
+		if (swin) {
+			tTJSNI_Window *wjs = swin->GetWindow();
+			iTVPDrawDevice *dd = wjs ? wjs->GetDrawDevice() : nullptr;
+			if (dd) static_cast<tTVPDrawDevice*>(dd)->SetLockedSize(s_fixedGameW, s_fixedGameH);
+		}
+	}
 
 	int activeDraws = 0;
 	if (g_displayMode == DisplayMode::VULKAN && gpu) {
@@ -487,7 +518,6 @@ void TVPEngineTick() {
 		activeDraws = (int)dc;
 	} else {
 		// Software path: read pixels from DrawBuffer, display via SDL_Renderer
-		g_gameW = 0; g_gameH = 0;
 		const void *pxData = nullptr;
 		int pxPitch = 0, pxW = 0, pxH = 0;
 		TVPWindowLayerSDL *sdlWin = TVPWindowLayerSDL::GetActiveWindow();
@@ -512,19 +542,23 @@ void TVPEngineTick() {
 					int pitched = (int)drawBuf->GetPitchBytes();
 					const void *pxbuf = drawBuf->GetScanLine(0);
 					if (pxbuf && pxW > 0 && pxH > 0) {
-						if (pxW != g_frameBuf.w || pxH != g_frameBuf.h) {
-							g_frameBuf.w = pxW; g_frameBuf.h = pxH;
-							g_frameBuf.pix.resize(pxW * pxH, 0);
+						int dispW = s_fixedGameW > 0 ? s_fixedGameW : pxW;
+						int dispH = s_fixedGameH > 0 ? s_fixedGameH : pxH;
+						if (dispW != g_frameBuf.w || dispH != g_frameBuf.h) {
+							g_frameBuf.w = dispW; g_frameBuf.h = dispH;
+							g_frameBuf.pix.resize(dispW * dispH, 0);
 						}
 						auto *dst = g_frameBuf.pix.data();
-						if (pitched == pxW * 4) {
-							memcpy(dst, pxbuf, pxH * pxW * 4);
-						} else {
-							for (int y = 0; y < pxH; y++)
-								memcpy((uint8_t*)dst + y * pxW * 4, (const uint8_t*)pxbuf + pitched * y, pxW * 4);
-						}
+						int copyW = std::min(pxW, dispW);
+						int copyH = std::min(pxH, dispH);
+						int srcX = (pxW - copyW) / 2;
+						if (srcX < 0) srcX = 0;
+						g_bufferOffsetX = srcX;
+						for (int y = 0; y < copyH; y++)
+							memcpy((uint8_t*)dst + y * dispW * 4, (const uint8_t*)pxbuf + pitched * y + srcX * 4, copyW * 4);
 						pxData = dst;
-						pxPitch = pxW * 4;
+						pxPitch = dispW * 4;
+						pxW = dispW; pxH = dispH;
 					}
 				}
 			}
@@ -547,7 +581,16 @@ void TVPEngineTick() {
 		g_gameW = pxW; g_gameH = pxH;
 
 		if (pxData && s_renderer && pxW > 0 && pxH > 0) {
-			if (!s_swDispTex || s_swDispW != pxW || s_swDispH != pxH) {
+			// Detect pending buffer resize (primaryLayer.setSize from fullscreen)
+			// On the first frame after a resize the buffer is all-zero → skip update
+			static int s_lastPxW = 0, s_lastPxH = 0;
+			bool bufferResized = (s_lastPxW > 0) && (pxW != s_lastPxW || pxH != s_lastPxH);
+			s_lastPxW = pxW; s_lastPxH = pxH;
+
+			// Use fixed game resolution for display (immune to TJS lockTouchSize)
+			int dispW = s_fixedGameW > 0 ? s_fixedGameW : pxW;
+			int dispH = s_fixedGameH > 0 ? s_fixedGameH : pxH;
+			if (!s_swDispTex || s_swDispW != dispW || s_swDispH != dispH) {
 				if (s_swDispTex) SDL_DestroyTexture(s_swDispTex);
 				s_swDispTex = SDL_CreateTexture(s_renderer,
 					SDL_PIXELFORMAT_ABGR8888,
@@ -555,14 +598,12 @@ void TVPEngineTick() {
 				s_swDispW = pxW; s_swDispH = pxH;
 			}
 			if (s_swDispTex) {
-				SDL_UpdateTexture(s_swDispTex, NULL, pxData, pxPitch);
-				// Re-query actual window/renderer size (may differ from initial if
-				// system UI transition isn't complete at SDL_main startup).
+				if (!bufferResized)
+					SDL_UpdateTexture(s_swDispTex, NULL, pxData, pxPitch);
 				int outW, outH;
 				SDL_GetRenderOutputSize(s_renderer, &outW, &outH);
 				if (outW != s_ScreenWidth || outH != s_ScreenHeight)
 					TVPSetScreenSizeFromSDL(outW, outH);
-				// Letterbox or stretch viewport
 				SDL_Rect dst;
 				if (g_fullscreenStretch) {
 					dst.x = 0; dst.y = 0;
@@ -584,9 +625,8 @@ void TVPEngineTick() {
 				}
 				SDL_SetRenderDrawColor(s_renderer, 0, 0, 0, 255);
 				SDL_RenderClear(s_renderer);
-				SDL_SetRenderViewport(s_renderer, &dst);
-				SDL_RenderTexture(s_renderer, s_swDispTex, NULL, NULL);
-				SDL_SetRenderViewport(s_renderer, NULL); // reset
+				SDL_FRect dstf = { (float)dst.x, (float)dst.y, (float)dst.w, (float)dst.h };
+				SDL_RenderTexture(s_renderer, s_swDispTex, NULL, &dstf);
 				SDL_RenderPresent(s_renderer);
 			}
 		}
@@ -617,10 +657,12 @@ void TVPEngineTick() {
 //------------------------------------------------------------------------------
 static void _screenToGame(float &sx, float &sy) {
 	if (g_gameW <= 0 || g_gameH <= 0 || s_ScreenWidth <= 0 || s_ScreenHeight <= 0) return;
+	float origX = sx, origY = sy;
 	if (g_fullscreenStretch) {
 		sx = sx * g_gameW / s_ScreenWidth; sy = sy * g_gameH / s_ScreenHeight;
 		if (sx < 0) sx = 0; if (sx >= g_gameW) sx = g_gameW - 1;
 		if (sy < 0) sy = 0; if (sy >= g_gameH) sy = g_gameH - 1;
+		__android_log_print(ANDROID_LOG_INFO, TAG, "TOUCH: stretch (%.0f,%.0f)->(%.0f,%.0f)", origX, origY, sx, sy);
 		return;
 	}
 	float gameAspect = (float)g_gameW / (float)g_gameH;
@@ -637,7 +679,30 @@ static void _screenToGame(float &sx, float &sy) {
 	float gy = (sy - vpY) * g_gameH / vpH;
 	if (gx < 0) gx = 0; if (gx >= g_gameW) gx = g_gameW - 1;
 	if (gy < 0) gy = 0; if (gy >= g_gameH) gy = g_gameH - 1;
-	sx = gx; sy = gy;
+	__android_log_print(ANDROID_LOG_INFO, TAG, "TOUCH: screen(%.0f,%.0f) game=(%d,%d) vp=(%d,%d %dx%d) gW=%d gH=%d sW=%d sH=%d",
+		origX, origY, (int)gx, (int)gy, vpX, vpY, vpW, vpH, g_gameW, g_gameH, s_ScreenWidth, s_ScreenHeight);
+	sx = gx + g_bufferOffsetX; sy = gy; // add buffer centering offset for primaryLayer > paintBox
+}
+
+void TVPGameToScreen(float &gx, float &gy) {
+	if (g_gameW <= 0 || g_gameH <= 0 || s_ScreenWidth <= 0 || s_ScreenHeight <= 0) return;
+	if (g_fullscreenStretch) {
+		gx = gx * s_ScreenWidth / g_gameW;
+		gy = gy * s_ScreenHeight / g_gameH;
+		return;
+	}
+	float gameAspect = (float)g_gameW / (float)g_gameH;
+	float screenAspect = (float)s_ScreenWidth / (float)s_ScreenHeight;
+	int vpW, vpH, vpX, vpY;
+	if (screenAspect > gameAspect) {
+		vpH = s_ScreenHeight; vpW = (int)(s_ScreenHeight * gameAspect);
+		vpX = (s_ScreenWidth - vpW) / 2; vpY = 0;
+	} else {
+		vpW = s_ScreenWidth; vpH = (int)(s_ScreenWidth / gameAspect);
+		vpX = 0; vpY = (s_ScreenHeight - vpH) / 2;
+	}
+	gx = gx * vpW / g_gameW + vpX;
+	gy = gy * vpH / g_gameH + vpY;
 }
 
 //------------------------------------------------------------------------------
@@ -654,8 +719,12 @@ void TVPForwardKeyEvent(int keyCode, bool isPress) {
 	}
 }
 
-// Touch→mouse state for cursor mode (trackpad behavior)
+	// Touch→mouse state for cursor mode (trackpad behavior)
 static struct { bool tracking; float startX, startY; int moved; } g_touchState;
+
+// Apply buffer centering offset for mouse events (when primaryLayer > paintBox)
+static inline int _cursorX() { return g_cursorX() + g_bufferOffsetX; }
+static inline int _cursorY() { return g_cursorY() + 0; }
 
 void TVPForwardTouchBegin(int id, float x, float y) {
 	TVPWindowLayerSDL *win = TVPWindowLayerSDL::GetActiveWindow();
@@ -671,6 +740,8 @@ void TVPForwardTouchBegin(int id, float x, float y) {
 			TVPPostInputEvent(new tTVPOnMouseDownInputEvent(win->GetWindow(), win->m_LastMouseX, win->m_LastMouseY, mbLeft, TVPGetCurrentShiftKeyState()));
 		}
 	} else {
+		// Avoid resetting start on duplicate (MOUSE_BUTTON_DOWN synthesized from same touch)
+		if (g_touchState.tracking) return;
 		// Cursor mode (trackpad): start tracking, don't click
 		g_touchState.tracking = true;
 		g_touchState.startX = x; g_touchState.startY = y;
@@ -692,7 +763,7 @@ void TVPForwardTouchEnd(int id, float x, float y) {
 		g_touchState.tracking = false;
 		// If finger barely moved → tap = click at cursor position
 		if (g_touchState.moved < 10) {
-			win->m_LastMouseX = g_cursorX; win->m_LastMouseY = g_cursorY;
+			win->m_LastMouseX = _cursorX(); win->m_LastMouseY = _cursorY();
 			s_Scancode[VK_LBUTTON] = 0x11;
 			if (win->GetWindow()) {
 				TVPPostInputEvent(new tTVPOnMouseMoveInputEvent(win->GetWindow(), win->m_LastMouseX, win->m_LastMouseY, TVPGetCurrentShiftKeyState()));
@@ -729,11 +800,11 @@ void TVPForwardTouchMove(int id, float x, float y) {
 		g_touchState.startX = x; g_touchState.startY = y;
 		g_touchState.moved += (int)(fabsf(dx) + fabsf(dy));
 
-		g_cursorX = std::max(0, std::min(g_gameW - 1, (int)(g_cursorX + dx)));
-		g_cursorY = std::max(0, std::min(g_gameH - 1, (int)(g_cursorY + dy)));
+		g_cursorXf = g_cursorXf + dx;
+		g_cursorYf = g_cursorYf + dy;
 
-		// Send mouse move to engine for hover effects
-		win->m_LastMouseX = g_cursorX; win->m_LastMouseY = g_cursorY;
+		// Send mouse move to engine for hover effects (with buffer offset)
+		win->m_LastMouseX = _cursorX(); win->m_LastMouseY = _cursorY();
 		if (win->GetWindow())
 			TVPPostInputEvent(new tTVPOnMouseMoveInputEvent(win->GetWindow(),
 				win->m_LastMouseX, win->m_LastMouseY, TVPGetCurrentShiftKeyState()), TVP_EPT_DISCARDABLE);

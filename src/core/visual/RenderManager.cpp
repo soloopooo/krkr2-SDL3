@@ -2218,11 +2218,11 @@ struct tRenderMethodCache {
 			if (nameHDA) HDA = mgr->GetRenderMethod(nameHDA);
 			if (nameOpa) {
 				WithOpa = mgr->GetRenderMethod(nameOpa);
-				NormalOpaID = WithOpa->EnumParameterID("opacity");
+				if (WithOpa) NormalOpaID = WithOpa->EnumParameterID("opacity");
 			}
 			if (nameHDAOpa) {
 				WithOpaHDA = mgr->GetRenderMethod(nameHDAOpa);
-				HDAOpaID = WithOpaHDA->EnumParameterID("opacity");
+				if (WithOpaHDA) HDAOpaID = WithOpaHDA->EnumParameterID("opacity");
 			}
 		}
 

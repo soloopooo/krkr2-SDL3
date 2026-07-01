@@ -106,6 +106,9 @@ void TVPForwardTouchMove(int id, float x, float y);
 void TVPForwardTouchCancel(int id, float x, float y);
 void TVPForwardTextInput(const std::string &text);
 void TVPSetScreenSizeFromSDL(int w, int h);
+
+// Convert game coordinates to screen coordinates (inverse of _screenToGame)
+void TVPGameToScreen(float &gx, float &gy);
 void TVPEngineTick();
 
 // Software display init (SDL_Renderer, called from SDL_main)

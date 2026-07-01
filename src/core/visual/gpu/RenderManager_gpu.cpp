@@ -61,12 +61,25 @@ tTVPGPUTexture2D::tTVPGPUTexture2D(SDL_GPUDevice *dev, SDL_GPUTexture *tex,
 	int texW, int texH, int w, int h,
 	TVPTextureFormat::e fmt, bool opaque)
 	: iTVPTexture2D(w, h), m_device(dev), m_texture(tex)
-	, m_texW(texW), m_texH(texH), m_format(fmt), m_opaque(opaque) {}
+	, m_texW(texW), m_texH(texH), m_format(fmt), m_opaque(opaque) {
+	m_width = w; m_height = h;
+	m_pitch = w * 4;
+	m_pixels.resize((size_t)(h * m_pitch));
+}
 
 tTVPGPUTexture2D::~tTVPGPUTexture2D() {
 	if (m_device && m_texture) {
 		SDL_ReleaseGPUTexture(m_device, m_texture);
 	}
+}
+
+const void * tTVPGPUTexture2D::GetScanLineForRead(tjs_uint l) {
+	if (l >= (tjs_uint)m_height) return nullptr;
+	return m_pixels.data() + l * m_pitch;
+}
+void * tTVPGPUTexture2D::GetScanLineForWrite(tjs_uint l) {
+	if (l >= (tjs_uint)m_height) return nullptr;
+	return m_pixels.data() + l * m_pitch;
 }
 
 void tTVPGPUTexture2D::Update(const void *pixel, TVPTextureFormat::e format,
@@ -228,6 +241,7 @@ TVPRenderManager_GPU::TVPRenderManager_GPU() {
 }
 
 TVPRenderManager_GPU::~TVPRenderManager_GPU() {
+	if (s_instance == this) s_instance = nullptr;
 	Shutdown();
 }
 
@@ -343,6 +357,21 @@ bool TVPRenderManager_GPU::Init(SDL_Window *window) {
 
 	// Store swapchain format for display pipeline
 	m_swapFormat = SDL_GetGPUSwapchainTextureFormat(m_device, m_window);
+
+	// Test texture creation with same usage as real textures
+	SDL_GPUTextureCreateInfo testTi = {};
+	testTi.type = SDL_GPU_TEXTURETYPE_2D;
+	testTi.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+	testTi.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+	testTi.width = 256; testTi.height = 256; testTi.layer_count_or_depth = 1;
+	testTi.num_levels = 1; testTi.sample_count = SDL_GPU_SAMPLECOUNT_1;
+	SDL_GPUTexture *testTex = SDL_CreateGPUTexture(m_device, &testTi);
+	if (!testTex) {
+		__android_log_print(ANDROID_LOG_ERROR, TAG,
+			"GPU texture allocation test failed (256x256), GPU renderer unusable");
+		return false;
+	}
+	SDL_ReleaseGPUTexture(m_device, testTex);
 
 	__android_log_print(ANDROID_LOG_INFO, TAG, "GPU renderer initialized (swapfmt=0x%x)", (unsigned)m_swapFormat);
 	return true;
@@ -705,6 +734,11 @@ tTVPGPURenderMethod* TVPRenderManager_GPU::_GetOrCreateMethod(const char *name) 
 iTVPRenderMethod* TVPRenderManager_GPU::GetRenderMethod(const char *name,
 	uint32_t *hint) {
 	auto *m = _GetOrCreateMethod(name);
+	if (!m) {
+		__android_log_print(ANDROID_LOG_WARN, TAG,
+			"GetRenderMethod(%s) failed, falling back to Copy", name);
+		m = _GetOrCreateMethod("Copy");
+	}
 	if (hint) *hint = 0;
 	return m;
 }
@@ -730,7 +764,11 @@ iTVPTexture2D* TVPRenderManager_GPU::CreateTexture2D(const void *pixel,
 	ti.num_levels = 1; ti.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
 	SDL_GPUTexture *tex = SDL_CreateGPUTexture(m_device, &ti);
-	if (!tex) return nullptr;
+	if (!tex) {
+		__android_log_print(ANDROID_LOG_WARN, TAG,
+			"SDL_CreateGPUTexture(%ux%u) failed, returning null", w, h);
+		return nullptr;
+	}
 
 	auto *ret = new tTVPGPUTexture2D(m_device, tex, (int)w, (int)h,
 		(int)w, (int)h, format, false);
@@ -770,17 +808,17 @@ iTVPTexture2D* TVPRenderManager_GPU::CreateTexture2D(unsigned int neww,
 // iTVPRenderManager — SetRenderTarget
 //------------------------------------------------------------------------------
 void TVPRenderManager_GPU::SetRenderTarget(iTVPTexture2D *target) {
-	// End previous pass if target changed
-	if (m_currentTarget != target) {
-		if (m_currentPass) {
-			SDL_EndGPURenderPass(m_currentPass);
-			m_currentPass = nullptr;
-		}
-		m_currentTarget = target;
-	}
-	if (!target || !m_cmd) return;
+	if (!m_cmd) return;
 
-	// Begin render pass on the GPU texture
+	// End previous pass unconditionally before switching
+	if (m_currentPass) {
+		SDL_EndGPURenderPass(m_currentPass);
+		m_currentPass = nullptr;
+	}
+	m_currentTarget = target;
+
+	if (!target) return;
+
 	tTVPGPUTexture2D *gpuTex = dynamic_cast<tTVPGPUTexture2D*>(target);
 	if (!gpuTex || !gpuTex->GetGPUTexture()) return;
 
@@ -790,6 +828,9 @@ void TVPRenderManager_GPU::SetRenderTarget(iTVPTexture2D *target) {
 	tg.store_op = SDL_GPU_STOREOP_STORE;
 	SDL_GPUColorTargetInfo targets[1] = { tg };
 	m_currentPass = SDL_BeginGPURenderPass(m_cmd, targets, 1, NULL);
+	if (!m_currentPass) {
+		__android_log_print(ANDROID_LOG_ERROR, "##krkr", "[DIAG] SDL_BeginGPURenderPass FAILED — tar=%p", target);
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -801,11 +842,17 @@ void TVPRenderManager_GPU::OperateRect(iTVPRenderMethod* method,
 	if (!m_device || !method) return;
 
 	tTVPGPURenderMethod *gpuMethod = dynamic_cast<tTVPGPURenderMethod*>(method);
-	if (!gpuMethod || !gpuMethod->GetPipeline()) return;
+	if (!gpuMethod || !gpuMethod->GetPipeline()) {
+		__android_log_print(ANDROID_LOG_INFO, "##krkr", "[DIAG] OperateRect: skip — method=%p isGpu=%d pipe=%p", method, !!gpuMethod, gpuMethod ? gpuMethod->GetPipeline() : 0);
+		return;
+	}
 
 	// Ensure render pass on target
 	SetRenderTarget(tar);
-	if (!m_currentPass) return;
+	if (!m_currentPass) {
+		__android_log_print(ANDROID_LOG_INFO, "##krkr", "[DIAG] OperateRect: no render pass after SetRenderTarget — tar=%p", tar);
+		return;
+	}
 
 	// Set viewport to destination rect
 	SDL_GPUViewport vp = {
@@ -1047,6 +1094,12 @@ extern "C" void TVPRegisterGPURenderer() {
 	if (!registered) {
 		TVPRegisterRenderManager("gpu",
 			[]() -> iTVPRenderManager* {
+				// Return existing initialized instance (created by SDL_main)
+				// to avoid creating a second uninitialized instance.
+				auto *inst = TVPRenderManager_GPU::Instance();
+				if (inst && inst->IsReady()) {
+					return inst;
+				}
 				return new TVPRenderManager_GPU;
 			});
 		registered = true;

@@ -248,8 +248,12 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
 	
 	@Override
 	public void onDestroy() {
-		// SDLActivity.onDestroy handles cleanup + waits for SDL thread to finish
 		super.onDestroy();
+		if (org.libsdl.app.SDLActivity.mSDLMainFinished) {
+			org.libsdl.app.SDLActivity.mSDLMainFinished = false;
+			org.libsdl.app.SDLActivity.mActivityCreated = false;
+			org.libsdl.app.SDLActivity.mSDLThread = null;
+		}
 	}
 	
 	static class DialogMessage
@@ -911,6 +915,13 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
     
     @TargetApi(Build.VERSION_CODES.HONEYCOMB)
     void doSetSystemUiVisibility() {
+		// Make status bar/nav bar transparent so game draws behind them
+		if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+			getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);
+			getWindow().setNavigationBarColor(android.graphics.Color.TRANSPARENT);
+		} else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
+			getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
+		}
 		int uiOpts = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
 		        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
 		        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
@@ -1002,21 +1013,20 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
                     mCursorView.setImageResource(
                         com.yuri.kirikiri2.R.drawable.ic_cursor);
                     mCursorView.setAlpha(0.85f);
-                    mCursorView.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null);
                     float density = sInstance.getResources().getDisplayMetrics().density;
                     int size = (int)(48 * density + 0.5f);
-                    android.widget.FrameLayout.LayoutParams lp =
-                        new android.widget.FrameLayout.LayoutParams(size, size);
-                    lp.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
-                    lp.leftMargin = 100; lp.topMargin = 100;
-                    mCursorView.setLayoutParams(lp);
-                    sInstance.mLayout.addView(mCursorView);
+                    sInstance.mLayout.addView(mCursorView, new android.view.ViewGroup.LayoutParams(size, size));
+                    mCursorView.setTranslationX(-9999); mCursorView.setTranslationY(-9999); // offscreen until first setCursorPos
                 }
                 if (mCursorView != null)
                     mCursorView.setVisibility(show ? View.VISIBLE : View.GONE);
             }
         });
     }
+
+    // Arrow tip position in the 24×24 cursor vector viewport
+    private static final float CURSOR_TIP_X = 4.5f;
+    private static final float CURSOR_TIP_Y = 2.0f;
 
     public static void setCursorPos(final int x, final int y) {
         final android.widget.ImageView v = mCursorView;
@@ -1025,11 +1035,15 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
             @Override
             public void run() {
                 if (v.getParent() == null) return;
-                android.view.ViewGroup.MarginLayoutParams lp =
-                    (android.view.ViewGroup.MarginLayoutParams)v.getLayoutParams();
-                lp.leftMargin = x;
-                lp.topMargin = y;
-                v.setLayoutParams(lp);
+                int iw = v.getWidth(), ih = v.getHeight();
+                if (iw <= 0 || ih <= 0) {
+                    android.view.ViewGroup.LayoutParams lp = v.getLayoutParams();
+                    iw = lp.width; ih = lp.height;
+                }
+                float tipOffX = CURSOR_TIP_X / 24f * iw;
+                float tipOffY = CURSOR_TIP_Y / 24f * ih;
+                v.setTranslationX(x - tipOffX);
+                v.setTranslationY(y - tipOffY);
             }
         });
     }
@@ -1113,6 +1127,9 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
     	msgHandler.post(new Runnable() {
 			@Override
 			public void run() {
+				org.libsdl.app.SDLActivity.mSDLMainFinished = false;
+				org.libsdl.app.SDLActivity.mActivityCreated = false;
+				org.libsdl.app.SDLActivity.mSDLThread = null;
 				Activity act = sInstance;
 				if (act != null) act.finish();
 			}

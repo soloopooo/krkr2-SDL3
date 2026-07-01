@@ -44,10 +44,14 @@
         <activity android:name="com.yuri.kirikiri2.VideoPlayerActivity"
             android:theme="@style/LauncherTheme"
             android:exported="false" />
+        <activity android:name="com.yuri.kirikiri2.ViewerActivity"
+            android:theme="@style/LauncherTheme"
+            android:exported="false" />
         <activity android:name=".MainActivity"
             android:screenOrientation="sensorLandscape"
                   android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|locale|layoutDirection|smallestScreenSize|uiMode"
                   android:windowSoftInputMode="adjustResize" android:theme="@style/AppTheme"
+            android:process=":game_core"
             android:exported="true">
         </activity>
     </application>

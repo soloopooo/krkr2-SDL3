@@ -2,6 +2,6 @@ package com.yuri.kirikiri2;
 
 class FileEntry {
 	String name, fullPath;
-	boolean isDirectory, isGame, isVideo;
+	boolean isDirectory, isGame, isVideo, isImage, isText;
 	long lastModified;
 }

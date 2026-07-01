@@ -2179,8 +2179,7 @@ class SDLMain implements Runnable {
             SDLActivity.mSDLThread = null;
             SDLActivity.mSDLMainFinished = true;
             SDLActivity.mSingleton.finish();
-        }  // else: Activity is already being destroyed
-
+        }
     }
 }
 

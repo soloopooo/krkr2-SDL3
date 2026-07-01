@@ -136,9 +136,6 @@ static std::vector<tTVPPrerenderedFontMap> TVPPrerenderedFontMapVector;
 void TVPMapPrerenderedFont(const tTVPFont & font, const ttstr & storage)
 {
 	// map specified font to specified prerendered font
-#ifdef KRKR2_SDL_BUILD
-	return; // SDL: prerendered fonts not supported, skip silently
-#else
 	ttstr fn = storage;
 	fn = TVPSearchPlacedPath(storage);
 
@@ -184,7 +181,6 @@ void TVPMapPrerenderedFont(const tTVPFont & font, const ttstr & storage)
 	TVPGlobalFontStateMagic ++; // increase magic number
 
 	TVPClearFontCache(); // clear font cache
-#endif
 }
 //---------------------------------------------------------------------------
 void TVPUnmapPrerenderedFont(const tTVPFont & font)

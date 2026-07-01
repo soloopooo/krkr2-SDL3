@@ -27,7 +27,7 @@ public class SettingsActivity extends AppCompatActivity {
 	private File mPrefFile;
 
 	private Switch mSetShowFps, mSetOutputLog, mSetKeepScreen, mSetHideSysBtn, mSetRemLastPath, mSetForceDefFont;
-	private MaterialButton mBtnFps, mBtnRenderer, mBtnMemUsage, mBtnDrawThreads, mBtnTexCompress, mBtnDefFont;
+	private MaterialButton mBtnFps, mBtnRenderer, mBtnMemUsage, mBtnDrawThreads, mBtnTexCompress, mBtnDefFont, mBtnFontScale;
 	private SeekBar mCursorBar;
 	private TextView mCursorVal;
 
@@ -52,6 +52,7 @@ public class SettingsActivity extends AppCompatActivity {
 		mBtnDrawThreads = findViewById(R.id.setDrawThreads);
 		mBtnTexCompress = findViewById(R.id.setTexCompress);
 		mBtnDefFont = findViewById(R.id.setDefaultFont);
+		mBtnFontScale = findViewById(R.id.setFontScale);
 		mCursorBar = findViewById(R.id.setCursorScale);
 		mCursorVal = findViewById(R.id.setCursorVal);
 
@@ -135,6 +136,18 @@ public class SettingsActivity extends AppCompatActivity {
 		});
 
 		mBtnDefFont.setOnClickListener(v -> showFontPicker());
+
+		mBtnFontScale.setOnClickListener(v -> {
+			String[] items = {"0.5", "0.75", "1.0", "1.25", "1.5", "1.75", "2.0"};
+			String[] labels = {"50%", "75%", "100%", "125%", "150%", "175%", "200%"};
+			new AlertDialog.Builder(this)
+				.setTitle("Font Scale")
+				.setItems(labels, (d, i) -> {
+					mBtnFontScale.setText(labels[i]);
+					save("font_scale", items[i]);
+				})
+				.show();
+		});
 	}
 
 	private void showFontPicker() {
@@ -253,6 +266,10 @@ public class SettingsActivity extends AppCompatActivity {
 		String[] texNames = {"none", "halfline", "lz4", "lz4+tlg5"};
 		String[] texLabels = {"None", "Half Line", "LZ4", "LZ4+TLG5"};
 		mBtnTexCompress.setText(pickLabel(getStr("software_compress_tex", "none"), texNames, texLabels));
+
+		String[] fsItems = {"0.5", "0.75", "1.0", "1.25", "1.5", "1.75", "2.0"};
+		String[] fsLabels = {"50%", "75%", "100%", "125%", "150%", "175%", "200%"};
+		mBtnFontScale.setText(pickLabel(getStr("font_scale", "1.0"), fsItems, fsLabels));
 
 		String font = getStr("default_font", "");
 		if (font.isEmpty()) mBtnDefFont.setText("Auto");

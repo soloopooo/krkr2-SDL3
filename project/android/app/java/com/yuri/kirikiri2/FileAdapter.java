@@ -48,8 +48,12 @@ class FileAdapter extends RecyclerView.Adapter<FileAdapter.ViewHolder> {
 		FileEntry e = mFiles.get(i);
 		if (e.isDirectory) {
 			h.icon.setImageResource(R.drawable.ic_folder);
+		} else if (e.isImage) {
+			h.icon.setImageResource(R.drawable.ic_insert_drive_file);
 		} else if (e.isVideo) {
 			h.icon.setImageResource(R.drawable.ic_play_arrow);
+		} else if (e.isText) {
+			h.icon.setImageResource(R.drawable.ic_insert_drive_file);
 		} else {
 			h.icon.setImageResource(e.isGame ? R.drawable.ic_videogame_asset : R.drawable.ic_insert_drive_file);
 		}
@@ -63,6 +67,12 @@ class FileAdapter extends RecyclerView.Adapter<FileAdapter.ViewHolder> {
 		} else if (e.isVideo) {
 			h.subtitle.setVisibility(View.VISIBLE);
 			h.subtitle.setText("Video file");
+		} else if (e.isImage) {
+			h.subtitle.setVisibility(View.VISIBLE);
+			h.subtitle.setText("Image file");
+		} else if (e.isText) {
+			h.subtitle.setVisibility(View.VISIBLE);
+			h.subtitle.setText("Text file");
 		} else {
 			h.subtitle.setVisibility(View.GONE);
 		}

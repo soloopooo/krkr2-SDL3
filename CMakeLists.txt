@@ -38,7 +38,7 @@ if(CMAKE_SYSTEM_NAME MATCHES "Android")
 		add_library(${PROJECT_NAME} SHARED
 			project/android/app/cpp/krkr2_android_sdl.cpp
 		)
-		target_compile_options(${PROJECT_NAME} PUBLIC -fPIE -DKRKR2_SDL_BUILD)
+		target_compile_options(${PROJECT_NAME} PUBLIC -fPIE -DKRKR2_SDL_BUILD -DKRKR2_USE_VULKAN)
 		target_include_directories(${PROJECT_NAME} PUBLIC
 			${KRKR2CORE_PATH}/environ/sdl
 			${PORTBUILD_PATH}/include

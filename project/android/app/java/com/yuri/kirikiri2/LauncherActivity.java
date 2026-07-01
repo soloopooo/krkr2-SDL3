@@ -75,6 +75,10 @@ public class LauncherActivity extends AppCompatActivity {
 				Intent intent = new Intent(this, VideoPlayerActivity.class);
 				intent.putExtra("videoPath", entry.fullPath);
 				startActivity(intent);
+			} else if (entry.isImage || entry.isText) {
+				Intent intent = new Intent(this, ViewerActivity.class);
+				intent.putExtra("filePath", entry.fullPath);
+				startActivity(intent);
 			}
 		},
 			(entry, pos) -> showFileMenu(entry, pos)
@@ -235,8 +239,8 @@ public class LauncherActivity extends AppCompatActivity {
 		popup.getMenu().add(0, 3, 0, "Delete");
 		popup.getMenu().add(0, 4, 0, "Rename");
 
-		if (entry.isGame || entry.isVideo) {
-			popup.getMenu().add(0, 7, 0, "Play");
+		if (entry.isGame || entry.isVideo || entry.isImage || entry.isText) {
+			popup.getMenu().add(0, 7, 0, "Open");
 		}
 
 		String lower = entry.name.toLowerCase();
@@ -261,6 +265,10 @@ public class LauncherActivity extends AppCompatActivity {
 						Intent vIntent = new Intent(this, VideoPlayerActivity.class);
 						vIntent.putExtra("videoPath", entry.fullPath);
 						startActivity(vIntent);
+					} else if (entry.isImage || entry.isText) {
+						Intent i = new Intent(this, ViewerActivity.class);
+						i.putExtra("filePath", entry.fullPath);
+						startActivity(i);
 					} else {
 						addRecent(entry.fullPath);
 						startGame(entry.fullPath);
@@ -411,7 +419,7 @@ public class LauncherActivity extends AppCompatActivity {
 		pd.setMax(100);
 		pd.show();
 
-		new AsyncTask<Void, Integer, Boolean>() {
+		new AsyncTask<Void, String, Boolean>() {
 			private String mError;
 			@Override
 			protected Boolean doInBackground(Void... v) {
@@ -430,7 +438,8 @@ public class LauncherActivity extends AppCompatActivity {
 						xp3File.getName().replaceAll("(?i)\\.xp[34]$", "") + "_unpacked");
 
 					XP3Extractor.extract(xp3File, outDir, entries, (fileName, cur, total) -> {
-						publishProgress(cur, total);
+						publishProgress(fileName);
+						pd.setMax(total); pd.setProgress(cur);
 					});
 					return true;
 				} catch (Throwable t) {
@@ -441,9 +450,8 @@ public class LauncherActivity extends AppCompatActivity {
 				}
 			}
 			@Override
-			protected void onProgressUpdate(Integer... v) {
-				pd.setProgress(v[0]);
-				pd.setMax(v[1]);
+			protected void onProgressUpdate(String... v) {
+				pd.setMessage(v[0]);
 			}
 			@Override
 			protected void onPostExecute(Boolean ok) {
@@ -658,6 +666,10 @@ public class LauncherActivity extends AppCompatActivity {
 
 				if (e.isDirectory) {
 					e.isGame = f.canRead() && new File(f, "startup.tjs").exists();
+				} else if (isImageFile(name)) {
+					e.isImage = true;
+				} else if (isTextFile(name)) {
+					e.isText = true;
 				} else if (isVideoFile(name)) {
 					e.isVideo = true;
 				} else if (isBootableFile(f)) {
@@ -692,10 +704,28 @@ public class LauncherActivity extends AppCompatActivity {
 
 	/** Check if a file is a bootable archive (XP3, or EXE with embedded XP3). */
 	private static final String[] VIDEO_EXTS = {".mp4", ".avi", ".mkv", ".wmv", ".flv", ".mov", ".webm", ".m4v", ".mpg", ".mpeg"};
+	private static final String[] IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tlg"};
+	private static final String[] TEXT_EXTS = {".txt", ".tjs", ".json", ".xml", ".log", ".csv",
+		".ini", ".cfg", ".conf", ".ks", ".asd", ".scn", ".bat", ".sh", ".yml", ".yaml",
+		".md", ".html", ".css", ".js", ".py", ".lua"};
 
 	private static boolean isVideoFile(String name) {
 		String lower = name.toLowerCase();
 		for (String ext : VIDEO_EXTS)
+			if (lower.endsWith(ext)) return true;
+		return false;
+	}
+
+	private static boolean isImageFile(String name) {
+		String lower = name.toLowerCase();
+		for (String ext : IMAGE_EXTS)
+			if (lower.endsWith(ext)) return true;
+		return false;
+	}
+
+	private static boolean isTextFile(String name) {
+		String lower = name.toLowerCase();
+		for (String ext : TEXT_EXTS)
 			if (lower.endsWith(ext)) return true;
 		return false;
 	}

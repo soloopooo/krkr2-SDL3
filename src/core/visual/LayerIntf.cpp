@@ -5245,11 +5245,7 @@ void tTJSNI_BaseLayer::MapPrerenderedFont(const ttstr & storage)
 {
 	ApplyFont();
 
-#ifdef KRKR2_SDL_BUILD
-	return; // SDL: skip prerendered fonts entirely
-#else
 	MainImage->MapPrerenderedFont(storage);
-#endif
 }
 //---------------------------------------------------------------------------
 void tTJSNI_BaseLayer::UnmapPrerenderedFont()
@@ -10949,12 +10945,8 @@ void tTJSNI_Font::GetFontList(tjs_uint32 flags, std::vector<ttstr> & list)
 //---------------------------------------------------------------------------
 void tTJSNI_Font::MapPrerenderedFont(const ttstr & storage)
 {
-#ifdef KRKR2_SDL_BUILD
-	return; // SDL: skip prerendered fonts
-#else
 	if( Layer ) Layer->MapPrerenderedFont(storage);
 	else TVPMapPrerenderedFont(Font, storage);
-#endif
 }
 //---------------------------------------------------------------------------
 void tTJSNI_Font::UnmapPrerenderedFont()

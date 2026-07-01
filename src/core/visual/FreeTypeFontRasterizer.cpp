@@ -8,6 +8,7 @@
 #include <math.h>
 #include "MsgIntf.h"
 #include "FontSystem.h"
+#include "ConfigManager/IndividualConfigManager.h"
 #include <complex>
 
 extern void TVPUninitializeFreeFont();
@@ -19,7 +20,9 @@ void FreeTypeFontRasterizer::ApplyFallbackFace()
 		FaceFallback = new tFreeTypeFace(TVPGetDefaultFontName(), 0);
 	}
 	if (!FaceFallback) return;
-	FaceFallback->SetHeight(CurrentFont.Height < 0 ? -CurrentFont.Height : CurrentFont.Height);
+	float fontScale = IndividualConfigManager::GetInstance()->GetValue<float>("font_scale", 1.0f);
+	int scaledHeight = (int)((CurrentFont.Height < 0 ? -CurrentFont.Height : CurrentFont.Height) * fontScale);
+	FaceFallback->SetHeight(scaledHeight);
 	if (CurrentFont.Flags & TVP_TF_ITALIC) {
 		FaceFallback->SetOption(TVP_TF_ITALIC);
 	} else {
@@ -81,16 +84,19 @@ void FreeTypeFontRasterizer::ApplyFont( class tTVPNativeBaseBitmap *bmp, bool fo
 //---------------------------------------------------------------------------
 void FreeTypeFontRasterizer::ApplyFont( const tTVPFont& font ) {
 	CurrentFont = font;
-	ttstr stdname = TVPFontSystem->GetBeingFont(font.Face);
-	// TVP_FACE_OPTIONS_NO_ANTIALIASING
-	// TVP_FACE_OPTIONS_NO_HINTING
-	// TVP_FACE_OPTIONS_FORCE_AUTO_HINTING
+	float fontScale = IndividualConfigManager::GetInstance()->GetValue<float>("font_scale", 1.0f);
 	tjs_uint32 opt = 0;
 	opt |= (font.Flags & TVP_TF_ITALIC) ? TVP_TF_ITALIC : 0;
 	opt |= (font.Flags & TVP_TF_BOLD) ? TVP_TF_BOLD : 0;
 	opt |= (font.Flags & TVP_TF_UNDERLINE) ? TVP_TF_UNDERLINE : 0;
 	opt |= (font.Flags & TVP_TF_STRIKEOUT) ? TVP_TF_STRIKEOUT : 0;
 	opt |= (font.Flags & TVP_TF_FONTFILE) ? TVP_FACE_OPTIONS_FILE : 0;
+	ttstr stdname;
+	if (font.Flags & TVP_TF_FONTFILE) {
+		stdname = font.Face;
+	} else {
+		stdname = TVPFontSystem->GetBeingFont(font.Face);
+	}
 	bool recreate = false;
 	if( Face ) {
 		if( Face->GetFontName() != stdname ) {
@@ -102,7 +108,8 @@ void FreeTypeFontRasterizer::ApplyFont( const tTVPFont& font ) {
 		Face = new tFreeTypeFace( stdname, opt );
 		recreate = true;
 	}
-	Face->SetHeight( font.Height < 0 ? -font.Height : font.Height );
+	int scaledHeight = (int)((font.Height < 0 ? -font.Height : font.Height) * fontScale);
+	Face->SetHeight( scaledHeight );
 	if( recreate == false ) {
 		if( font.Flags & TVP_TF_ITALIC ) {
 			Face->SetOption(TVP_TF_ITALIC);
@@ -210,7 +217,7 @@ tTVPCharacterData* FreeTypeFontRasterizer::GetBitmap( const tTVPFontAndCharacter
 }
 //---------------------------------------------------------------------------
 void FreeTypeFontRasterizer::GetGlyphDrawRect( const ttstr & text, tTVPRect& area ) {
-	// ƒAƒ“ƒ`ƒGƒCƒŠƒAƒX‚Æƒqƒ“ƒeƒBƒ“ƒO‚Í—LŒø‚É‚·‚é
+	// ï¿½Aï¿½ï¿½ï¿½`ï¿½Gï¿½Cï¿½ï¿½ï¿½Aï¿½Xï¿½Æƒqï¿½ï¿½ï¿½eï¿½Bï¿½ï¿½ï¿½Oï¿½Í—Lï¿½ï¿½ï¿½É‚ï¿½ï¿½ï¿½
 	Face->ClearOption( TVP_FACE_OPTIONS_NO_ANTIALIASING );
 	Face->ClearOption( TVP_FACE_OPTIONS_NO_HINTING );
 
@@ -223,6 +230,10 @@ void FreeTypeFontRasterizer::GetGlyphDrawRect( const ttstr & text, tTVPRect& are
 		tjs_int ax, ay;
 		tTVPRect rt(0,0,0,0);
 		bool result = Face->GetGlyphRectFromCharcode(rt,ch,ax,ay);
+		if (!result && FaceFallback) {
+			ApplyFallbackFace();
+			result = FaceFallback->GetGlyphRectFromCharcode(rt,ch,ax,ay);
+		}
 		if( result == false ) result = Face->GetGlyphRectFromCharcode(rt,Face->GetDefaultChar(),ax,ay);
 		if( result == false ) result = Face->GetGlyphRectFromCharcode(rt,Face->GetFirstChar(),ax,ay);
 		if( result ) {

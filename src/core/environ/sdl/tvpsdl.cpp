@@ -13,6 +13,10 @@ static bool sSDLInited = false;
 static int sScreenWidth = 1280;
 static int sScreenHeight = 720;
 
+// When a finger is down on Android, SDL3 synthesizes duplicate MOUSE events.
+// We skip those to avoid corrupting cursor tracking coordinates.
+static bool sFingerDown = false;
+
 void TVPInitSDL() {
 	if (sSDLInited) return;
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) < 0) {
@@ -73,16 +77,19 @@ void TVPProcessSDLEvents() {
 			break;
 		// Touch events (primary on Android)
 		case SDL_EVENT_FINGER_DOWN:
+			sFingerDown = true;
 			TVPForwardTouchBegin(0,
 				e.tfinger.x * sScreenWidth,
 				e.tfinger.y * sScreenHeight);
 			break;
 		case SDL_EVENT_FINGER_UP:
+			sFingerDown = false;
 			TVPForwardTouchEnd(0,
 				e.tfinger.x * sScreenWidth,
 				e.tfinger.y * sScreenHeight);
 			break;
 		case SDL_EVENT_FINGER_CANCELED:
+			sFingerDown = false;
 			TVPForwardTouchCancel(0,
 				e.tfinger.x * sScreenWidth,
 				e.tfinger.y * sScreenHeight);
@@ -92,15 +99,15 @@ void TVPProcessSDLEvents() {
 				e.tfinger.x * sScreenWidth,
 				e.tfinger.y * sScreenHeight);
 			break;
-		// Mouse events (USB/Bluetooth mouse, stylus hover)
+		// Mouse events (USB/Bluetooth mouse) — skip while finger is touching
 		case SDL_EVENT_MOUSE_MOTION:
-			TVPForwardTouchMove(0, e.motion.x, e.motion.y);
+			if (!sFingerDown) TVPForwardTouchMove(0, e.motion.x, e.motion.y);
 			break;
 		case SDL_EVENT_MOUSE_BUTTON_DOWN:
-			TVPForwardTouchBegin(0, e.button.x, e.button.y);
+			if (!sFingerDown) TVPForwardTouchBegin(0, e.button.x, e.button.y);
 			break;
 		case SDL_EVENT_MOUSE_BUTTON_UP:
-			TVPForwardTouchEnd(0, e.button.x, e.button.y);
+			if (!sFingerDown) TVPForwardTouchEnd(0, e.button.x, e.button.y);
 			break;
 		case SDL_EVENT_KEY_DOWN:
 			TVPForwardKeyEvent(_mapSDLK2VK(e.key.key), true);

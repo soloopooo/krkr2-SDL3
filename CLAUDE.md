@@ -242,3 +242,12 @@ LauncherActivity (back to launcher)
 3. Implement file scanning + display (scan Download/ for .xp3 or startup.tjs dirs)
 4. On game select: `startActivity` with startupPath extra → `MainActivity`
 5. Modify `TVPExitApplication` / `KR2Activity` to finish() instead of System.exit()
+
+## Memory files
+
+| File | Content |
+|------|---------|
+| `.opencode/memories/cursor-exit-multiprocess.md` | Virtual cursor fixes, exit flow, audio cleanup, multi-process FORTIFY fix |
+| `.opencode/memories/native-launcher-complete.md` | Native Android LauncherActivity implementation |
+| `.opencode/memories/audio-resampling-gpu-state.md` | SDL_AudioStream per-stream resampling, GPU renderer state |
+| `.opencode/memories/project-architecture-overview.md` | Full architecture overview (rendering, audio, plugins, build)

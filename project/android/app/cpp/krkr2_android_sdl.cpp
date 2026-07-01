@@ -30,6 +30,7 @@
 #include "visual/gpu/RenderManager_gpu.h"
 #include "visual/win32/MenuItemImpl.h"
 #include "vkdefine.h"
+#include "sound/win32/WaveMixer.h"
 
 extern void TVPForceSwapBuffer();
 extern void TVPShowGamePicker();
@@ -162,7 +163,7 @@ extern tTJSNI_Window *TVPGetActiveWindow();
 extern void TVPShowIME(tjs_int x, tjs_int y, tjs_int w, tjs_int h);
 
 bool g_mouseMode = true;
-int g_cursorX = 0, g_cursorY = 0;
+float g_cursorXf = 0, g_cursorYf = 0;
 extern bool g_fullscreenStretch;
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -292,9 +293,10 @@ void TVPUpdateCursorOverlay() {
 	if (!cls) return;
 	jmethodID mid = env->GetStaticMethodID(cls, "setCursorPos", "(II)V");
 	if (mid) {
-		int sx = g_cursorX * s_ScreenWidth / (g_gameW ? g_gameW : 1);
-		int sy = g_cursorY * s_ScreenHeight / (g_gameH ? g_gameH : 1);
-		env->CallStaticVoidMethod(cls, mid, sx, sy);
+		int cx = g_cursorX(), cy = g_cursorY();
+		float scx = (float)cx, scy = (float)cy;
+		TVPGameToScreen(scx, scy);
+		env->CallStaticVoidMethod(cls, mid, (int)scx, (int)scy);
 	}
 	env->DeleteLocalRef(cls);
 }
@@ -340,12 +342,8 @@ extern "C" int SDL_main(int argc, char *argv[]) {
 	__android_log_print(ANDROID_LOG_INFO, TAG,
 		"SDL_main: window %dx%d created", scrW, scrH);
 
-	// Select display mode
-#ifdef KRKR2_USE_VULKAN
-	g_displayMode = DisplayMode::VULKAN;
-#else
+	// Select display mode — force SOFTWARE for baseline testing
 	g_displayMode = DisplayMode::SOFTWARE;
-#endif
 
 	if (g_displayMode == DisplayMode::VULKAN) {
 		// Init GPU renderer (SDL_Gpu/Vulkan)
@@ -384,14 +382,10 @@ extern "C" int SDL_main(int argc, char *argv[]) {
 		TVPEngineTick();
 	}
 
-	// Cleanup
+	// Cleanup — keep SDL alive so process stays for LauncherActivity
 	__android_log_print(ANDROID_LOG_INFO, TAG, "SDL_main: engine terminated, cleanup");
-	if (g_displayMode == DisplayMode::VULKAN) {
-		auto *gpu = TVPRenderManager_GPU::Instance();
-		if (gpu) gpu->Shutdown();
-	}
+	TVPUninitDirectSound();
 	SDL_DestroyWindow(win);
-	SDL_Quit();
 	__android_log_print(ANDROID_LOG_INFO, TAG, "SDL_main EXIT");
 	return 0;
 }

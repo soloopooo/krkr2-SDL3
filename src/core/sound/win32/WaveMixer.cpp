@@ -109,6 +109,9 @@ public:
 	const signed int MAX_VOLUME = 16384; // limit in signed 16bit
 	int16_t _volume_raw[8];
 	int _frame_size = 0;
+	int _sampleRate = 0;
+	SDL_AudioStream *_resampler = nullptr;
+	int _outFrameSize = 0;
 
 	void RecalcVolume() {
 		if (_pan > 0) {
@@ -129,7 +132,8 @@ public:
 	tjs_uint _sendedFrontBuffer = 0;
 	tjs_uint _sendedSamples = 0, _inCachedSamples = 0;
 
-	tTVPSoundBuffer(int framesize) : _frame_size(framesize) {
+	tTVPSoundBuffer(int framesize, int sampleRate = 0, int outFrameSize = 0)
+		: _frame_size(framesize), _sampleRate(sampleRate), _outFrameSize(outFrameSize) {
 		RecalcVolume();
 	}
 	virtual ~tTVPSoundBuffer();
@@ -167,8 +171,23 @@ public:
 	virtual void AppendBuffer(const void *_inbuf, unsigned int inlen/*, int tag = 0*/) override {
 		{
 			std::lock_guard<std::mutex> lk(_buffer_mtx);
-			_buffers.emplace_back((uint8_t*)_inbuf, ((uint8_t*)_inbuf) + inlen);
-			_inCachedSamples += inlen / _frame_size;
+			if (_resampler) {
+				// Convert now: feed raw data through resampler, store output-format data
+				SDL_PutAudioStreamData(_resampler, (const uint8_t*)_inbuf, inlen);
+				int avail = SDL_GetAudioStreamAvailable(_resampler);
+				if (avail > 0) {
+					std::vector<uint8_t> conv(avail);
+					int got = SDL_GetAudioStreamData(_resampler, conv.data(), avail);
+					if (got > 0) {
+						conv.resize(got);
+						_buffers.push_back(std::move(conv));
+						_inCachedSamples += got / _outFrameSize;
+					}
+				}
+			} else {
+				_buffers.emplace_back((uint8_t*)_inbuf, ((uint8_t*)_inbuf) + inlen);
+				_inCachedSamples += inlen / _frame_size;
+			}
 		}
 	}
 	virtual bool IsBufferValid() override {
@@ -220,7 +239,23 @@ public:
 	virtual bool Init() = 0;
 
 	virtual tTVPSoundBuffer* CreateStream(tTVPWaveFormat &fmt, int bufcount) {
-		tTVPSoundBuffer* s = new tTVPSoundBuffer(fmt.BytesPerSample * fmt.Channels);
+		int framesize = fmt.BytesPerSample * fmt.Channels;
+		int outFrameSize = SDL_AUDIO_BITSIZE(_spec.format) / 8 * _spec.channels;
+		tTVPSoundBuffer* s = new tTVPSoundBuffer(framesize, fmt.SamplesPerSec, outFrameSize);
+		// Always create resampler to handle rate/format/channel conversion
+		if (fmt.SamplesPerSec > 0) {
+			SDL_AudioSpec srcSpec = {};
+			srcSpec.freq = fmt.SamplesPerSec;
+			srcSpec.channels = (Uint8)fmt.Channels;
+			if (fmt.IsFloat) srcSpec.format = SDL_AUDIO_F32LE;
+			else if (fmt.BitsPerSample == 8) srcSpec.format = SDL_AUDIO_U8;
+			else srcSpec.format = SDL_AUDIO_S16LE;
+			SDL_AudioSpec dstSpec = {};
+			dstSpec.freq = _spec.freq;
+			dstSpec.channels = (Uint8)_spec.channels;
+			dstSpec.format = (SDL_AudioFormat)_spec.format;
+			s->_resampler = SDL_CreateAudioStream(&srcSpec, &dstSpec);
+		}
 		std::lock_guard<std::mutex> lk(_streams_mtx);
 		_streams.emplace(s);
 		return s;
@@ -229,6 +264,12 @@ public:
 	void ReleaseStream(tTVPSoundBuffer* s) {
 		std::lock_guard<std::mutex> lk(_streams_mtx);
 		_streams.erase(s);
+	}
+
+	void StopAllStreams() {
+		std::lock_guard<std::mutex> lk(_streams_mtx);
+		for (tTVPSoundBuffer* s : _streams)
+			s->Stop();
 	}
 
 	void FillBuffer(Uint8 *buf, int len) {
@@ -255,6 +296,7 @@ public:
 tTVPSoundBuffer::~tTVPSoundBuffer()
 {
 	Stop();
+	if (_resampler) SDL_DestroyAudioStream(_resampler);
 	TVPAudioRenderer->ReleaseStream(this);
 }
 
@@ -698,7 +740,11 @@ void TVPInitDirectSound(int freq)
 
 void TVPUninitDirectSound()
 {
-	// nothing to do
+	if (TVPAudioRenderer) {
+		TVPAudioRenderer->StopAllStreams();
+		delete TVPAudioRenderer;
+		TVPAudioRenderer = nullptr;
+	}
 }
 
 iTVPSoundBuffer* TVPCreateSoundBuffer(tTVPWaveFormat &fmt, int bufcount)

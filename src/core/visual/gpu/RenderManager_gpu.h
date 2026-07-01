@@ -24,8 +24,12 @@ class tTVPGPUTexture2D : public iTVPTexture2D {
 	SDL_GPUDevice *m_device;
 	SDL_GPUTexture *m_texture;
 	int m_texW, m_texH;
+	int m_bmpW, m_bmpH;
 	TVPTextureFormat::e m_format;
 	bool m_opaque;
+	// CPU-side pixel buffer for GetScanLineForRead/Write (software compat)
+	std::vector<uint8_t> m_pixels;
+	int m_width, m_height, m_pitch;
 public:
 	tTVPGPUTexture2D(SDL_GPUDevice *dev, SDL_GPUTexture *tex,
 		int texW, int texH, int w, int h,
@@ -35,6 +39,8 @@ public:
 	SDL_GPUTexture *GetGPUTexture() const { return m_texture; }
 
 	TVPTextureFormat::e GetFormat() const override { return m_format; }
+	const void * GetScanLineForRead(tjs_uint l) override;
+	void * GetScanLineForWrite(tjs_uint l) override;
 	void Update(const void *pixel, TVPTextureFormat::e format, int pitch, const tTVPRect& rc) override;
 	uint32_t GetPoint(int x, int y) override;
 	void SetPoint(int x, int y, uint32_t clr) override;
@@ -168,6 +174,7 @@ public:
 	bool Init(SDL_Window *window);
 	void Shutdown();
 	static TVPRenderManager_GPU *Instance() { return s_instance; }
+	bool IsReady() const { return m_device != nullptr; }
 
 	// iTVPRenderManager
 	const char *GetName() override { return "gpu"; }
