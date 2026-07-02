@@ -273,3 +273,4 @@ iTVPRenderManager *TVPGetRenderManager();
 namespace TJS { class tTJSString; }
 iTVPRenderManager *TVPGetRenderManager(const TJS::tTJSString &name);
 bool TVPIsSoftwareRenderManager();
+void TVPRetryGPU(); // called by SDL_main after GPU init to switch from temp software

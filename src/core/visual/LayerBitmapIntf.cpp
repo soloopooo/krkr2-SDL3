@@ -944,9 +944,12 @@ bool iTVPBaseBitmap::CopyRect(tjs_int x, tjs_int y, const iTVPBaseBitmap *ref,
 		plane == (TVP_BB_COPY_MASK|TVP_BB_COPY_MAIN) &&
 		(bool)!Is32BPP() == (bool)!ref->Is32BPP())
 	{
-		//__android_log_print(ANDROID_LOG_INFO, "##krkr", "COPYRECT: fast path AssignTexture srcTex=%p", ref->GetTexture());
-		AssignTexture(ref->GetTexture());
-		return true;
+		// GPU renderer: skip AssignTexture (avoids texture pointer aliasing)
+		// Fall through to regular Blt path which uses OperateRect
+		if (GetRenderManager() && GetRenderManager()->IsSoftware()) {
+			AssignTexture(ref->GetTexture());
+			return true;
+		}
 	}
 
 	// bound check
@@ -1462,41 +1465,18 @@ bool iTVPBaseBitmap::Blt(tjs_int x, tjs_int y, const iTVPBaseBitmap *ref,
 
 	iTVPRenderManager *mgr = GetRenderManager();
 	if (!mgr->IsSoftware()) {
-		// CPU fallback for non-software renderers (OGL FBO compositing broken)
-		iTVPRenderManager *swMgr = TVPGetSoftwareRenderManager();
-		iTVPRenderMethod *swMethod = swMgr->GetRenderMethod(opa, hda, method);
-		if (!swMethod) { /*__android_log_print(ANDROID_LOG_INFO, "##krkr", "BLT: no swMethod...");*/ return false; }
-		tTVPRenderMethod_Software *swImpl = static_cast<tTVPRenderMethod_Software*>(swMethod);
-		iTVPTexture2D *dstTex = GetTextureForRender(swMethod->IsBlendTarget(), &rect);
-		iTVPTexture2D *srcTex = ref->GetTexture();
-		//__android_log_print(ANDROID_LOG_INFO, "##krkr", "BLT: CPU fallback dstTex=%p srcTex=%p rect=(%d,%d-%d,%d) opa=%d hda=%d method=%d",
-		//	dstTex, srcTex, rect.left, rect.top, rect.right, rect.bottom, opa, hda, method);
-		// Ensure both textures have CPU pixel data
-		dstTex->GetScanLineForRead(0);
-		srcTex->GetScanLineForRead(0);
-		// Diagnostic: sample source pixels before blend (only for small rects — likely fonts)
-		if (refrect.get_width() <= 256 && refrect.get_height() <= 64 && srcTex->GetPixelData()) {
-			uint32_t *sp = (uint32_t*)srcTex->GetScanLineForRead(0);
-			int spw = srcTex->GetPitch() / 4;
-			uint32_t sp00 = sp[refrect.top * spw + refrect.left];
-			__android_log_print(ANDROID_LOG_INFO, "##krkr", "TXT_DIAG: src=(%d,%d,%d,%d) sp[0]=0x%08x",
-				refrect.left, refrect.top, refrect.right, refrect.bottom, sp00);
+		// CPU fallback for OGL renderer (FBO compositing broken).
+		// GPU renderer uses OperateRect below — skip CPU fallback.
+		ttstr rn(mgr->GetName());
+		if (rn != TJS_W("gpu")) {
+			iTVPRenderManager *swMgr = TVPGetSoftwareRenderManager();
+			iTVPRenderMethod *swMethod = swMgr->GetRenderMethod(opa, hda, method);
+			if (!swMethod) return false;
+			iTVPTexture2D *dstTex = GetTextureForRender(swMethod->IsBlendTarget(), &rect);
+			iTVPTexture2D *srcTex = ref->GetTexture();
+			static_cast<tTVPRenderMethod_Software*>(swMethod)->DoRender(dstTex, rect, dstTex, rect, srcTex, refrect, nullptr, refrect);
+			return true;
 		}
-		swImpl->DoRender(dstTex, rect, dstTex, rect, srcTex, refrect, nullptr, refrect);
-		// Diagnostic: read back dest pixel after blend
-		if (rect.get_width() <= 256 && rect.get_height() <= 64) {
-			uint32_t *dp = (uint32_t*)dstTex->GetScanLineForRead(0);
-			int dpw = dstTex->GetPitch() / 4;
-			uint32_t dp00 = dp[rect.top * dpw + rect.left];
-			if (dp00) {
-				__android_log_print(ANDROID_LOG_INFO, "##krkr", "TXT_DIAG: AFTER dst[%d,%d]=0x%08x (OK non-zero!)",
-					rect.left, rect.top, dp00);
-			}
-		}
-		// PixelData now has blended result, IsTextureDirty=true.
-		// Upload to GL happens once per frame in _useOGLTexture (WindowLayer_sdl.cpp).
-		// NOT calling Update() here — keeping PixelData alive avoids per-frame glReadPixels.
-		return true;
 	}
 	// Original path: software compositing through OperateRect
 	tRenderTexRectArray::Element src_tex[] = {

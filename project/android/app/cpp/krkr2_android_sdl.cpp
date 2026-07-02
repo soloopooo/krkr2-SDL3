@@ -40,6 +40,11 @@ iTJSDispatch2* TVPGetMenuDispatch(tTVInteger hWnd);
 
 JavaVM *jni::g_JVM = nullptr;
 
+// Display backend selection — set from Java before SDL_main runs.
+// "vulkan" = Vulkan GPU display (SDL_ClaimWindowForGPUDevice)
+// "sdl"    = SDL_Renderer display
+std::string g_AndroidDisplayBackend = "vulkan"; // default
+
 //---------------------------------------------------------------------------
 // Helper: JNI string -> std::string, cache g_JVM from first JNI call
 //---------------------------------------------------------------------------
@@ -132,6 +137,22 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_org_tvp_kirikiri2_KR2Activity_nativeGetHideSystemButton(JNIEnv *, jclass) {
 	return GlobalConfigManager::GetInstance()
 		->GetValue<bool>("hide_android_sys_btn", false);
+}
+
+// --- KR2Activity display backend ---
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_tvp_kirikiri2_KR2Activity_nativeSetDisplayBackend(JNIEnv *env, jclass,
+		jstring jBackend) {
+	if (jBackend) {
+		const char *s = env->GetStringUTFChars(jBackend, nullptr);
+		if (s) {
+			g_AndroidDisplayBackend = s;
+			__android_log_print(ANDROID_LOG_INFO, TAG,
+				"nativeSetDisplayBackend: %s", s);
+			env->ReleaseStringUTFChars(jBackend, s);
+		}
+	}
 }
 
 // --- KR2Activity startup args ---
@@ -342,39 +363,53 @@ extern "C" int SDL_main(int argc, char *argv[]) {
 	__android_log_print(ANDROID_LOG_INFO, TAG,
 		"SDL_main: window %dx%d created", scrW, scrH);
 
-	// Select display mode — force SOFTWARE for baseline testing
-	g_displayMode = DisplayMode::SOFTWARE;
-
-	if (g_displayMode == DisplayMode::VULKAN) {
-		// Init GPU renderer (SDL_Gpu/Vulkan)
+	// Init display backend based on Java-side Intent preference.
+	// Only ONE backend is initialized to avoid Vulkan window claim conflicts.
+	// Vulkan: SDL_ClaimWindowForGPUDevice — full GPU compositing.
+	// SDL: SDL_Renderer — software compositing only.
+	bool gpuInitialized = false;
+	if (g_AndroidDisplayBackend == "vulkan" || g_AndroidDisplayBackend == "gpu") {
 		TVPRenderManager_GPU *gpuRenderer = new TVPRenderManager_GPU();
-		if (!gpuRenderer->Init(win)) {
-			__android_log_print(ANDROID_LOG_ERROR, TAG,
-				"GPU renderer init failed, falling back to software");
-			delete gpuRenderer;
-			g_displayMode = DisplayMode::SOFTWARE;
-		} else {
+		if (gpuRenderer->Init(win)) {
 			__android_log_print(ANDROID_LOG_INFO, TAG,
 				"GPU renderer (Vulkan) initialized");
+			TVPRetryGPU();
+			gpuInitialized = true;
+		} else {
+			__android_log_print(ANDROID_LOG_WARN, TAG,
+				"Vulkan init failed, falling back to SDL_Renderer");
+			delete gpuRenderer;
 		}
 	}
-
-	if (g_displayMode == DisplayMode::SOFTWARE) {
+	if (!gpuInitialized) {
 		if (!TVPInitDisplay(win)) {
 			__android_log_print(ANDROID_LOG_ERROR, TAG,
 				"SDL_Renderer init failed, cannot render");
 			return 1;
 		}
 		__android_log_print(ANDROID_LOG_INFO, TAG,
-			"Software display (SDL_Renderer) initialized");
+			"SDL_Renderer display initialized (software compositing)");
 	}
+
+	// Set global flag for render manager selection
+	g_VulkanDisplayActive = gpuInitialized;
 
 	// Init locale
 	LocaleConfigManager::GetInstance()->Initialize(TVPGetCurrentLanguage());
 
-	// Check startup args or auto-start game
-	if (!TVPCheckStartupArg()) {
-		TVPShowGamePicker();
+	// Startup compositing — only if GPU is active (renderer config selects "gpu")
+	if (TVPRenderManager_GPU::Instance() && !TVPGetRenderManager()->IsSoftware()) {
+		TVPRenderManager_GPU::Instance()->BeginFrame();
+		// Check startup args or auto-start game
+		if (!TVPCheckStartupArg()) {
+			TVPShowGamePicker();
+		}
+		TVPRenderManager_GPU::Instance()->EndFrame();
+	} else {
+		// Check startup args or auto-start game (software mode)
+		if (!TVPCheckStartupArg()) {
+			TVPShowGamePicker();
+		}
 	}
 
 	// Main render loop

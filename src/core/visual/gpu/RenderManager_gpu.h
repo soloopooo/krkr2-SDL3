@@ -1,5 +1,6 @@
 #pragma once
 #include <SDL3/SDL_gpu.h>
+#include <atomic>
 #include <vector>
 #include <map>
 #include <unordered_map>
@@ -30,6 +31,7 @@ class tTVPGPUTexture2D : public iTVPTexture2D {
 	// CPU-side pixel buffer for GetScanLineForRead/Write (software compat)
 	std::vector<uint8_t> m_pixels;
 	int m_width, m_height, m_pitch;
+	bool m_needsInit = true; // clear on first render-pass use
 public:
 	tTVPGPUTexture2D(SDL_GPUDevice *dev, SDL_GPUTexture *tex,
 		int texW, int texH, int w, int h,
@@ -48,6 +50,8 @@ public:
 	bool IsOpaque() override { return m_opaque; }
 	cocos2d::Texture2D* GetAdapterTexture(cocos2d::Texture2D* origTex) override { return nullptr; }
 	bool GetScale(float &x, float &y) override { x = 1.f; y = 1.f; return true; }
+	bool NeedsInit() const { return m_needsInit; }
+	void SetInitialized() { m_needsInit = false; }
 };
 
 //------------------------------------------------------------------------------
@@ -74,6 +78,7 @@ class tTVPGPURenderMethod : public iTVPRenderMethod {
 	float m_vague = 0;
 	int m_uboID_Vague = -1;
 	int m_uboID_Phase = -1;
+	int m_opacity = 255;
 
 public:
 	tTVPGPURenderMethod(SDL_GPUDevice *dev,
@@ -123,6 +128,9 @@ class TVPRenderManager_GPU : public iTVPRenderManager {
 	SDL_GPUTexture *m_swapchainTex = nullptr;
 	SDL_GPURenderPass *m_currentPass = nullptr;
 	iTVPTexture2D *m_currentTarget = nullptr;
+	iTVPTexture2D *m_displayTarget = nullptr; // DrawBuffer texture for present
+	SDL_GPUTexture *m_fallbackTex = nullptr;  // CPU upload fallback texture
+	int m_fallbackW = 0, m_fallbackH = 0;
 	Uint32 m_swW = 0, m_swH = 0;
 
 	// Readback state (double-buffered with fence)
@@ -140,16 +148,22 @@ class TVPRenderManager_GPU : public iTVPRenderManager {
 
 	// Pipeline cache
 	SDL_GPUGraphicsPipeline *m_quadPipeline = nullptr;
+	SDL_GPUGraphicsPipeline *m_presentPipeline = nullptr;
 	std::unordered_map<uint32_t, tTVPGPURenderMethod*> m_methodCache;
 
 	// Fullscreen vertex data (2 tris, 6 verts, pos + uv)
 	static const float s_quadVerts[24];
+	int m_drawCount = 0;
+	bool m_frameFirstTarget = true;    // first SetRenderTarget this frame → CLEAR
 	SDL_GPUTextureFormat m_swapFormat; // swapchain format
 	SDL_GPUTextureFormat m_texFormat = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
 	SDL_GPUShader *m_fs_gray = nullptr; // grayscale frag shader
 	SDL_GPUShader *m_fs_blur = nullptr; // box blur frag shader
 	SDL_GPUShader *m_fs_adjustGamma = nullptr; // AdjustGamma frag shader (UBO)
 	SDL_GPUShader *m_fs_univTrans = nullptr; // UnivTransBlend frag shader (3tex+UBO)
+	SDL_GPUShader *m_fs_fill = nullptr;      // solid-color fill frag shader
+	SDL_GPUShader *m_fs_present = nullptr;   // present (force alpha=1) frag shader
+	SDL_GPUShader *m_fs_crossfade = nullptr; // crossfade (2-tex blend) frag shader
 
 	SDL_GPUGraphicsPipeline* _CreateQuadPipeline(
 		SDL_GPUTextureFormat format,
@@ -166,6 +180,8 @@ class TVPRenderManager_GPU : public iTVPRenderManager {
 	void _PresentToSwapchain();
 
 	static TVPRenderManager_GPU *s_instance;
+	static std::atomic<uint64_t> s_totalVMem;
+	friend class tTVPGPUTexture2D;
 
 public:
 	TVPRenderManager_GPU();
@@ -174,6 +190,9 @@ public:
 	bool Init(SDL_Window *window);
 	void Shutdown();
 	static TVPRenderManager_GPU *Instance() { return s_instance; }
+	static SDL_GPUCommandBuffer *CurrentCmd() {
+		return s_instance ? s_instance->m_cmd : nullptr;
+	}
 	bool IsReady() const { return m_device != nullptr; }
 
 	// iTVPRenderManager
@@ -211,6 +230,9 @@ public:
 	// Frame lifecycle — called from TVPEngineTick
 	void BeginFrame();
 	void EndFrame();
+	void SetFallbackDisplay(const void *pixels, int w, int h);
+	// End current render pass (for texture updates between draws)
+	void FlushPass();
 	void ReadbackAndPresent(iTVPTexture2D *finalTex);
 	const uint8_t* GetFramePixels(int &w, int &h) const {
 		if (!m_hasFrameResult) return nullptr;
@@ -218,6 +240,11 @@ public:
 		return m_framePixels.data();
 	}
 	void ResetFrameResult() { m_hasFrameResult = false; }
+
+	// Synchronous pixel readback for diagnostics (separate command buffer).
+	// Reads pixel at (x,y) from tex. Returns 0 on failure.
+	// Only use for debugging — SLOW (stalls GPU).
+	uint32_t ReadbackPixel(SDL_GPUTexture *tex, int x, int y);
 };
 
 // Registration

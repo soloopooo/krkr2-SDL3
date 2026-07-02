@@ -113,3 +113,8 @@ void TVPEngineTick();
 
 // Software display init (SDL_Renderer, called from SDL_main)
 bool TVPInitDisplay(struct SDL_Window *win);
+
+// Display backend flag — set by SDL_main after backend init.
+// true = Vulkan GPU display (full GPU compositing)
+// false = SDL_Renderer display (software compositing)
+extern bool g_VulkanDisplayActive;

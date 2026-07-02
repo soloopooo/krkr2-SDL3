@@ -31,6 +31,7 @@ extern "C" {
 #ifdef KRKR2_SDL_BUILD
 extern "C" void TVPRegisterGPURenderer();
 #endif
+iTVPRenderManager * TVPGetSoftwareRenderManager();
 
 #ifdef _MSC_VER
 #pragma comment(lib,"opencv_ts300d.lib")
@@ -4379,7 +4380,7 @@ void TVPRegisterRenderManager(const char* name, iTVPRenderManager*(*func)()) {
 	_RenderManagerFactory->emplace(name, std::make_pair(func, nullptr));
 }
 
-iTVPRenderManager * TVPGetRenderManager(const ttstr &name)
+	iTVPRenderManager * TVPGetRenderManager(const ttstr &name)
 {
 	auto it = _RenderManagerFactory->find(name);
 	if (it == _RenderManagerFactory->end()) {
@@ -4389,30 +4390,70 @@ iTVPRenderManager * TVPGetRenderManager(const ttstr &name)
 		return it->second.second;
 	}
 	iTVPRenderManager *mgr = it->second.first();
+	if (!mgr) return nullptr; // factory returned null (e.g. GPU not available)
 	mgr->Initialize();
 	it->second.second = mgr;
 	return mgr;
 }
 
-	iTVPRenderManager * TVPGetRenderManager() {
-	static iTVPRenderManager *_RenderManager;
-	if (!_RenderManager) {
-#ifdef KRKR2_SDL_BUILD
-		TVPRegisterGPURenderer();
-		ttstr str = "software";
-#else
-		ttstr str = IndividualConfigManager::GetInstance()->GetValue<std::string>("renderer", "software");
-#endif
-		_RenderManager = TVPGetRenderManager(str);
-		__android_log_print(ANDROID_LOG_INFO, "##krkr", "TVPGetRenderManager: selected '%s', IsSoftware=%d",
-			str.AsStdString().c_str(), _RenderManager->IsSoftware());
+	static bool s_needRetryGPU = false;
+
+	void TVPRetryGPU() {
+		s_needRetryGPU = true;
 	}
-	return _RenderManager;
-}
+
+	// Display backend flag — defined in WindowLayer_sdl.cpp, set by SDL_main.
+	// Forces the compositing mode to match the display backend:
+	//   Vulkan display → GPU compositing
+	//   SDL_Renderer display → software compositing
+	extern bool g_VulkanDisplayActive;
+
+	iTVPRenderManager * TVPGetRenderManager() {
+		static iTVPRenderManager *_RenderManager = nullptr;
+		if (!_RenderManager || s_needRetryGPU && _RenderManager->IsSoftware()) {
+			s_needRetryGPU = false;
+			_RenderManager = nullptr; // clear stale cache
+			ttstr str;
+#ifdef KRKR2_SDL_BUILD
+			TVPRegisterGPURenderer();
+#endif
+			// Read renderer choice from config
+			str = IndividualConfigManager::GetInstance()->GetValue<std::string>("renderer", "gpu");
+			if (str == "vulkan") str = "gpu"; // settings form may store "vulkan"
+			// Force compositing mode to match display backend.
+			// Vulkan display requires GPU compositing; SDL_Renderer display requires software.
+			if (g_VulkanDisplayActive && str != "gpu") {
+				__android_log_print(ANDROID_LOG_INFO, "##krkr",
+					"TVPGetRenderManager: overriding renderer '%s' → 'gpu' (Vulkan display active)",
+					str.AsStdString().c_str());
+				str = "gpu";
+			} else if (!g_VulkanDisplayActive && str != "software") {
+				__android_log_print(ANDROID_LOG_INFO, "##krkr",
+					"TVPGetRenderManager: overriding renderer '%s' → 'software' (SDL_Renderer display active)",
+					str.AsStdString().c_str());
+				str = "software";
+			}
+			_RenderManager = TVPGetRenderManager(str);
+#ifdef KRKR2_SDL_BUILD
+			if (!_RenderManager && str == "gpu") {
+				// GPU not ready yet (called during static init before SDL_main).
+				// Cache software temporarily. SDL_main will call TVPRetryGPU() later.
+				static bool s_logged = false;
+				if (!s_logged) { s_logged = true;
+					__android_log_print(ANDROID_LOG_INFO, "##krkr",
+						"TVPGetRenderManager: GPU not ready, using software fallback");
+				}
+				_RenderManager = TVPGetSoftwareRenderManager();
+			}
+#endif
+			__android_log_print(ANDROID_LOG_INFO, "##krkr", "TVPGetRenderManager: selected '%s', IsSoftware=%d",
+				str.AsStdString().c_str(), _RenderManager->IsSoftware());
+		}
+		return _RenderManager;
+	}
 
 bool TVPIsSoftwareRenderManager() {
-	static bool ret = TVPGetRenderManager()->IsSoftware();
-	return ret;
+	return TVPGetRenderManager()->IsSoftware();
 }
 
 iTVPRenderManager * TVPGetSoftwareRenderManager() { // for province image process

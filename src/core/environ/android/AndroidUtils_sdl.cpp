@@ -96,24 +96,30 @@ extern void TVPForceSwapBuffer();
 // Memory info
 //---------------------------------------------------------------------------
 static void _updateMemoryInfo() {
+	static tjs_uint32 _lastQuery = 0;
+	tjs_uint32 now = TVPGetRoughTickCount32();
+	if (_lastQuery > 0 && now - _lastQuery < 3000) return;
 	JniMethodInfo t;
 	if (getStaticMethodInfo(t, KR2ACT_PATH, "updateMemoryInfo", "()V")) {
 		t.env->CallStaticVoidMethod(t.classID, t.methodID);
 		t.env->DeleteLocalRef(t.classID);
+		_lastQuery = now;
 	}
 }
 
 tjs_int TVPGetSystemFreeMemory() {
+	_updateMemoryInfo();
 	JniMethodInfo t;
 	if (getStaticMethodInfo(t, KR2ACT_PATH, "getAvailMemory", "()J")) {
 		jlong ret = t.env->CallStaticLongMethod(t.classID, t.methodID);
 		t.env->DeleteLocalRef(t.classID);
-		return (tjs_int)(ret >> 10);
+		return (tjs_int)(ret / (1024 * 1024));
 	}
 	return 0;
 }
 
 tjs_int TVPGetSelfUsedMemory() {
+	_updateMemoryInfo();
 	JniMethodInfo t;
 	if (getStaticMethodInfo(t, KR2ACT_PATH, "getUsedMemory", "()J")) {
 		jlong ret = t.env->CallStaticLongMethod(t.classID, t.methodID);

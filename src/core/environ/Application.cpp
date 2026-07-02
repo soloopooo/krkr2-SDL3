@@ -789,10 +789,11 @@ void tTVPApplication::Run() {
 			TVPSystemUninit();
 			TVPExitApplication(TVPTerminateCode);
 		}
-	//	TVPBreathe();
 		ProcessMessages();
 		if (TVPSystemControl) TVPSystemControl->SystemWatchTimerTimer();
-//		TVPDeliverWindowUpdateEvents(); // from SystemWatchTimerTimer
+#ifndef KRKR2_SDL_BUILD
+		TVPDeliverWindowUpdateEvents(); // from SystemWatchTimerTimer
+#endif
 	} catch (const EAbort &) {
 		// nothing to do
 #if !(defined(_MSC_VER) && defined(_DEBUG))

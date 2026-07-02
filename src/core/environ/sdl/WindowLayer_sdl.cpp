@@ -11,6 +11,7 @@
 #include "../android/JNIHelper_sdl.h"
 
 bool g_fullscreenStretch = false;
+bool g_VulkanDisplayActive = false;
 #include <vector>
 
 #include "WindowLayer_sdl.h"
@@ -262,6 +263,47 @@ void TVPConsoleLog(const ttstr &l, bool) {
 }
 
 //------------------------------------------------------------------------------
+//------------------------------------------------------------------------------
+static int s_dumpFrame = 0;
+static void DumpBMP(const uint32_t *pixels, int w, int h) {
+	if (!pixels || w <= 0 || h <= 0) return;
+	// Dump every 30th frame (for a ~60fps game, that's every ~500ms)
+	s_dumpFrame++;
+	if (s_dumpFrame % 30 != 0) return;
+	int pitch = w * 4;
+	int dataSize = pitch * h;
+	int bmpSize = 14 + 40 + dataSize;
+	std::vector<uint8_t> bmp(bmpSize);
+	// BMP header
+	bmp[0] = 'B'; bmp[1] = 'M';
+	*(uint32_t*)&bmp[2] = bmpSize;
+	*(uint32_t*)&bmp[10] = 14 + 40;
+	// DIB header
+	*(uint32_t*)&bmp[14] = 40;        // header size
+	*(int32_t*) &bmp[18] = w;         // width
+	*(int32_t*) &bmp[22] = -h;        // negative height = top-down
+	*(uint16_t*)&bmp[26] = 1;         // planes
+	*(uint16_t*)&bmp[28] = 32;        // bpp
+	*(uint32_t*)&bmp[30] = 0;         // no compression
+	*(uint32_t*)&bmp[34] = dataSize;  // image size
+	// Pixel data (ABGR → BGRA with alpha=255)
+	auto *dst = &bmp[54];
+	for (int y = 0; y < h; y++) {
+		for (int x = 0; x < w; x++) {
+			uint32_t px = pixels[y * w + x];
+			dst[0] = (uint8_t)(px >> 16); // B
+			dst[1] = (uint8_t)(px >> 8);  // G
+			dst[2] = (uint8_t)(px);       // R
+			dst[3] = 0xFF;                // A
+			dst += 4;
+		}
+	}
+	char path[128];
+	snprintf(path, sizeof(path), "/sdcard/Download/dump_%03d.bmp", s_dumpFrame/30);
+	FILE *f = fopen(path, "wb");
+	if (f) { fwrite(bmp.data(), 1, bmpSize, f); fclose(f); }
+	__android_log_print(ANDROID_LOG_INFO, TAG, "DUMP: %s (%dx%d)", path, w, h);
+}
 // Per-frame engine tick
 //------------------------------------------------------------------------------
 static struct { int w, h; std::vector<uint32_t> pix; } g_frameBuf;
@@ -376,7 +418,7 @@ static const uint8_t font8x8[96][8] = {
 static void _drawText(uint32_t *pixels, int fbW, int fbH, int x, int y,
 	const char *text, uint32_t color, int scale);
 
-static void _updateDebugOverlayJNI(bool firstCheck) {
+static void _updateDebugOverlayJNI(bool firstCheck, int activeDraws = 0, uint64_t vramSize = 0) {
 	static bool showFps = false;
 	static bool checked = false;
 	if (!checked || firstCheck) {
@@ -396,24 +438,17 @@ static void _updateDebugOverlayJNI(bool firstCheck) {
 	}
 	if (!showFps) return;
 
-	// Smoothed FPS
-	static float smoothFps = 60.0f;
+	// Instant FPS (1 / frame delta)
 	static auto lastFpsTime = std::chrono::steady_clock::now();
 	auto now = std::chrono::steady_clock::now();
-	float dt = std::chrono::duration_cast<std::chrono::microseconds>(
+	float dtSec = std::chrono::duration_cast<std::chrono::microseconds>(
 		now - lastFpsTime).count() / 1000000.0f;
 	lastFpsTime = now;
-	if (dt > 0.0f && dt < 1.0f)
-		smoothFps = smoothFps * 0.9f + (1.0f / dt) * 0.1f;
-
-	unsigned int drawCount = 0; uint64_t vmem = 0;
-	TVPGetRenderManager()->GetRenderStat(drawCount, vmem);
-	tjs_int selfMem = TVPGetSelfUsedMemory();
-	tjs_int freeMem = TVPGetSystemFreeMemory();
+	float instFps = (dtSec > 0.0f) ? (1.0f / dtSec) : 0.0f;
 
 	char text[128];
-	snprintf(text, sizeof(text), "%.1f (%u draws)\n%d MB(%.2f MB) %d MB",
-		smoothFps, drawCount, selfMem, (float)vmem / 1024.0f, freeMem);
+	snprintf(text, sizeof(text), "%.0f (%d draws)\n%d MB(%.2f MB) %d MB",
+		instFps, activeDraws, TVPGetSelfUsedMemory(), (float)(vramSize >> 10) / 1024.0f, TVPGetSystemFreeMemory());
 
 	// Update Android overlay via JNI
 	JNIEnv *env = jni::GetEnv();
@@ -470,12 +505,13 @@ void TVPEngineTick() {
 	DrainAndroidEventQueue();
 	TVPProcessSDLEvents();
 
-	TVPRenderManager_GPU *gpu = TVPRenderManager_GPU::Instance();
-	if (g_displayMode == DisplayMode::VULKAN && gpu) {
-		gpu->BeginFrame();
+	bool gpuActive = !TVPGetRenderManager()->IsSoftware();
+	if (gpuActive) {
+		TVPRenderManager_GPU::Instance()->BeginFrame();
 	}
 
 	::Application->Run();
+
 	// After compositing, force locked size to game resolution (overrides TJS lockTouchSize)
 	if (s_fixedGameW > 0) {
 		TVPWindowLayerSDL *swin = TVPWindowLayerSDL::GetActiveWindow();
@@ -486,6 +522,16 @@ void TVPEngineTick() {
 		}
 	}
 	iTVPTexture2D::RecycleProcess();
+	// Deliver continuous events (calls transition idle callbacks, TJS continuous handlers)
+	{
+		static uint64_t s_logTick = 0;
+		uint64_t engTick = (uint64_t)TVPGetTickCount();
+		if (engTick - s_logTick >= 1000) {
+			s_logTick = engTick;
+			__android_log_print(ANDROID_LOG_INFO, "##krkr", "TICK: engTick=%llu", (unsigned long long)engTick);
+		}
+	}
+	TVPDeliverContinuousEvent();
 	TVPDeliverWindowUpdateEvents();
 
 	// Force locked size to game resolution (overrides TJS lockTouchSize)
@@ -499,7 +545,9 @@ void TVPEngineTick() {
 	}
 
 	int activeDraws = 0;
-	if (g_displayMode == DisplayMode::VULKAN && gpu) {
+	uint64_t vramSize = 0;
+	if (gpuActive) {
+		TVPRenderManager_GPU *gpu = TVPRenderManager_GPU::Instance();
 		gpu->EndFrame();
 		// Readback pixels for diagnostics
 		int rw = 0, rh = 0;
@@ -513,9 +561,55 @@ void TVPEngineTick() {
 			memcpy(g_frameBuf.pix.data(), rp, rw * rh * 4);
 		}
 		gpu->ResetFrameResult();
+		// Dump every 30th frame
+		{
+			const uint32_t *dumpSrc = nullptr;
+			int dumpW = 0, dumpH = 0;
+			if (g_frameBuf.w > 0 && g_frameBuf.pix.size() > 0) {
+				dumpSrc = g_frameBuf.pix.data();
+				dumpW = g_frameBuf.w; dumpH = g_frameBuf.h;
+			} else {
+				// Fallback: read from DrawBuffer directly
+				TVPWindowLayerSDL *swin = TVPWindowLayerSDL::GetActiveWindow();
+				if (swin) {
+					tTJSNI_Window *wjs = swin->GetWindow();
+					iTVPDrawDevice *dd = wjs ? wjs->GetDrawDevice() : nullptr;
+					if (dd) {
+						auto *ddc = static_cast<tTVPDrawDevice*>(dd);
+						for (size_t i = 0; ; i++) {
+							iTVPLayerManager *lm = ddc->GetLayerManagerAt(i);
+							if (!lm) break;
+							iTVPBaseBitmap *dbuf = lm->GetDrawBuffer();
+							if (dbuf && dbuf->GetWidth() > 0 && dbuf->GetHeight() > 0) {
+								const void *sl = dbuf->GetScanLine(0);
+								if (sl) {
+									dumpW = (int)dbuf->GetWidth();
+									dumpH = (int)dbuf->GetHeight();
+									// Ensure g_frameBuf has the data
+									if (dumpW != g_frameBuf.w || dumpH != g_frameBuf.h) {
+										g_frameBuf.w = dumpW; g_frameBuf.h = dumpH;
+										g_frameBuf.pix.resize(dumpW * dumpH, 0);
+									}
+									int pitch = (int)dbuf->GetPitchBytes();
+									for (int y = 0; y < dumpH; y++)
+										memcpy((uint8_t*)g_frameBuf.pix.data() + y * dumpW * 4,
+											(const uint8_t*)sl + pitch * y, dumpW * 4);
+									dumpSrc = g_frameBuf.pix.data();
+								}
+							}
+						}
+					}
+				}
+			}
+			if (dumpSrc && dumpW > 0 && dumpH > 0) {
+				s_dumpFrame++;
+				if (s_dumpFrame % 30 == 0)
+					DumpBMP(dumpSrc, dumpW, dumpH);
+			}
+		}
 		unsigned int dc = 0; uint64_t vm = 0;
 		TVPGetRenderManager()->GetRenderStat(dc, vm);
-		activeDraws = (int)dc;
+		activeDraws = (int)dc; vramSize = vm;
 	} else {
 		// Software path: read pixels from DrawBuffer, display via SDL_Renderer
 		const void *pxData = nullptr;
@@ -527,14 +621,23 @@ void TVPEngineTick() {
 			if (dd) {
 				unsigned int dc = 0; uint64_t vm = 0;
 				TVPGetRenderManager()->GetRenderStat(dc, vm);
-				activeDraws = (int)dc;
+				activeDraws = (int)dc; vramSize = vm;
 				auto *ddc = static_cast<tTVPDrawDevice*>(dd);
 				iTVPBaseBitmap *drawBuf = nullptr;
+				static int s_lmFrame = 0; s_lmFrame++;
 				for (size_t i = 0; ; i++) {
 					iTVPLayerManager *lm = ddc->GetLayerManagerAt(i);
 					if (!lm) break;
 					iTVPBaseBitmap *buf = lm->GetDrawBuffer();
-					if (buf) drawBuf = buf;
+					if (buf) {
+						if (s_lmFrame % 30 == 0) {
+							const void *sl0 = buf->GetScanLine(0);
+							uint32_t pix = sl0 ? *(const uint32_t*)sl0 : 0;
+							__android_log_print(ANDROID_LOG_INFO, "##LM", "lm[%zu]=%p buf=%p %dx%d pix=0x%08X draws=%d",
+								i, lm, buf, (int)buf->GetWidth(), (int)buf->GetHeight(), pix, activeDraws);
+						}
+						drawBuf = buf;
+					}
 				}
 				if (drawBuf) {
 					pxW = (int)drawBuf->GetWidth();
@@ -542,23 +645,24 @@ void TVPEngineTick() {
 					int pitched = (int)drawBuf->GetPitchBytes();
 					const void *pxbuf = drawBuf->GetScanLine(0);
 					if (pxbuf && pxW > 0 && pxH > 0) {
-						int dispW = s_fixedGameW > 0 ? s_fixedGameW : pxW;
-						int dispH = s_fixedGameH > 0 ? s_fixedGameH : pxH;
-						if (dispW != g_frameBuf.w || dispH != g_frameBuf.h) {
-							g_frameBuf.w = dispW; g_frameBuf.h = dispH;
-							g_frameBuf.pix.resize(dispW * dispH, 0);
-						}
-						auto *dst = g_frameBuf.pix.data();
-						int copyW = std::min(pxW, dispW);
-						int copyH = std::min(pxH, dispH);
-						int srcX = (pxW - copyW) / 2;
-						if (srcX < 0) srcX = 0;
-						g_bufferOffsetX = srcX;
-						for (int y = 0; y < copyH; y++)
-							memcpy((uint8_t*)dst + y * dispW * 4, (const uint8_t*)pxbuf + pitched * y + srcX * 4, copyW * 4);
-						pxData = dst;
-						pxPitch = dispW * 4;
-						pxW = dispW; pxH = dispH;
+					int dispW = pxW;
+					int dispH = pxH;
+					if (dispW != g_frameBuf.w || dispH != g_frameBuf.h) {
+						g_frameBuf.w = dispW; g_frameBuf.h = dispH;
+						g_frameBuf.pix.resize(dispW * dispH, 0);
+					}
+					auto *dst = g_frameBuf.pix.data();
+					int copyW = pxW;
+					int copyH = pxH;
+					// Copy full buffer and force alpha to opaque (fix: fade-out overlay clears Dst Alpha)
+					for (int y = 0; y < copyH; y++) {
+						memcpy((uint8_t*)dst + y * dispW * 4, (const uint8_t*)pxbuf + pitched * y, copyW * 4);
+						uint32_t *row = (uint32_t*)dst + y * dispW;
+						for (int x = 0; x < copyW; x++) row[x] |= 0xFF000000;
+					}
+					pxData = dst;
+					pxPitch = dispW * 4;
+					pxW = dispW; pxH = dispH;
 					}
 				}
 			}
@@ -580,17 +684,18 @@ void TVPEngineTick() {
 		}
 		g_gameW = pxW; g_gameH = pxH;
 
-		if (pxData && s_renderer && pxW > 0 && pxH > 0) {
+		if (pxData && s_renderer && pxW > 0 && pxH > 0 &&
+			(activeDraws > 0 || !s_swDispTex)) {
 			// Detect pending buffer resize (primaryLayer.setSize from fullscreen)
 			// On the first frame after a resize the buffer is all-zero → skip update
 			static int s_lastPxW = 0, s_lastPxH = 0;
 			bool bufferResized = (s_lastPxW > 0) && (pxW != s_lastPxW || pxH != s_lastPxH);
 			s_lastPxW = pxW; s_lastPxH = pxH;
 
-			// Use fixed game resolution for display (immune to TJS lockTouchSize)
-			int dispW = s_fixedGameW > 0 ? s_fixedGameW : pxW;
-			int dispH = s_fixedGameH > 0 ? s_fixedGameH : pxH;
-			if (!s_swDispTex || s_swDispW != dispW || s_swDispH != dispH) {
+			// Use raw buffer size for display texture
+			int dispW = pxW;
+			int dispH = pxH;
+			if (!s_swDispTex || s_swDispW != pxW || s_swDispH != pxH) {
 				if (s_swDispTex) SDL_DestroyTexture(s_swDispTex);
 				s_swDispTex = SDL_CreateTexture(s_renderer,
 					SDL_PIXELFORMAT_ABGR8888,
@@ -598,8 +703,8 @@ void TVPEngineTick() {
 				s_swDispW = pxW; s_swDispH = pxH;
 			}
 			if (s_swDispTex) {
-				if (!bufferResized)
-					SDL_UpdateTexture(s_swDispTex, NULL, pxData, pxPitch);
+				if (!SDL_UpdateTexture(s_swDispTex, NULL, pxData, pxPitch))
+					__android_log_print(ANDROID_LOG_ERROR, TAG, "SDL_UpdateTexture failed: %s", SDL_GetError());
 				int outW, outH;
 				SDL_GetRenderOutputSize(s_renderer, &outW, &outH);
 				if (outW != s_ScreenWidth || outH != s_ScreenHeight)
@@ -632,6 +737,23 @@ void TVPEngineTick() {
 		}
 	}
 
+	// Frame rate limiting
+	{
+		static int s_fpsLimit = 60;
+		static int s_refreshCounter = 0;
+		s_refreshCounter++;
+		if (s_refreshCounter >= 30) {
+			s_refreshCounter = 0;
+			s_fpsLimit = GlobalConfigManager::GetInstance()->GetValue<int>("fps_limit", 60);
+		}
+		auto frameElapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+			std::chrono::steady_clock::now() - tickStart).count();
+		int targetUs = s_fpsLimit > 0 ? (1000000 / s_fpsLimit) : 0;
+		if (targetUs > 0 && frameElapsed < targetUs) {
+			SDL_Delay((targetUs - (int)frameElapsed) / 1000);
+		}
+	}
+
 	// FPS tracking
 	g_stats.frameCount++;
 	if (activeDraws > 0) g_stats.framesWithDraws++;
@@ -648,7 +770,7 @@ void TVPEngineTick() {
 	}
 
 	// Android native overlay (FPS/memory) — works for both Software and Vulkan modes
-	_updateDebugOverlayJNI(false);
+	_updateDebugOverlayJNI(false, activeDraws, vramSize);
 	TVPUpdateCursorOverlay();
 }
 
@@ -662,7 +784,6 @@ static void _screenToGame(float &sx, float &sy) {
 		sx = sx * g_gameW / s_ScreenWidth; sy = sy * g_gameH / s_ScreenHeight;
 		if (sx < 0) sx = 0; if (sx >= g_gameW) sx = g_gameW - 1;
 		if (sy < 0) sy = 0; if (sy >= g_gameH) sy = g_gameH - 1;
-		__android_log_print(ANDROID_LOG_INFO, TAG, "TOUCH: stretch (%.0f,%.0f)->(%.0f,%.0f)", origX, origY, sx, sy);
 		return;
 	}
 	float gameAspect = (float)g_gameW / (float)g_gameH;
@@ -679,8 +800,6 @@ static void _screenToGame(float &sx, float &sy) {
 	float gy = (sy - vpY) * g_gameH / vpH;
 	if (gx < 0) gx = 0; if (gx >= g_gameW) gx = g_gameW - 1;
 	if (gy < 0) gy = 0; if (gy >= g_gameH) gy = g_gameH - 1;
-	__android_log_print(ANDROID_LOG_INFO, TAG, "TOUCH: screen(%.0f,%.0f) game=(%d,%d) vp=(%d,%d %dx%d) gW=%d gH=%d sW=%d sH=%d",
-		origX, origY, (int)gx, (int)gy, vpX, vpY, vpW, vpH, g_gameW, g_gameH, s_ScreenWidth, s_ScreenHeight);
 	sx = gx + g_bufferOffsetX; sy = gy; // add buffer centering offset for primaryLayer > paintBox
 }
 
@@ -757,8 +876,10 @@ void TVPForwardTouchEnd(int id, float x, float y) {
 		_screenToGame(gx, gy);
 		win->m_LastMouseX = (tjs_int)gx; win->m_LastMouseY = (tjs_int)gy;
 		s_Scancode[VK_LBUTTON] &= 0x10;
-		if (win->GetWindow())
+		if (win->GetWindow()) {
 			TVPPostInputEvent(new tTVPOnMouseUpInputEvent(win->GetWindow(), win->m_LastMouseX, win->m_LastMouseY, mbLeft, TVPGetCurrentShiftKeyState()));
+			TVPPostInputEvent(new tTVPOnClickInputEvent(win->GetWindow(), win->m_LastMouseX, win->m_LastMouseY));
+		}
 	} else if (g_touchState.tracking) {
 		g_touchState.tracking = false;
 		// If finger barely moved → tap = click at cursor position
@@ -770,8 +891,10 @@ void TVPForwardTouchEnd(int id, float x, float y) {
 				TVPPostInputEvent(new tTVPOnMouseDownInputEvent(win->GetWindow(), win->m_LastMouseX, win->m_LastMouseY, mbLeft, TVPGetCurrentShiftKeyState()));
 			}
 			s_Scancode[VK_LBUTTON] &= 0x10;
-			if (win->GetWindow())
+			if (win->GetWindow()) {
 				TVPPostInputEvent(new tTVPOnMouseUpInputEvent(win->GetWindow(), win->m_LastMouseX, win->m_LastMouseY, mbLeft, TVPGetCurrentShiftKeyState()));
+				TVPPostInputEvent(new tTVPOnClickInputEvent(win->GetWindow(), win->m_LastMouseX, win->m_LastMouseY));
+			}
 		}
 	}
 }

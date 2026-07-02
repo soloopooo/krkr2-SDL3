@@ -131,14 +131,9 @@ void tTVPLayerManager::DrawCompleted(const tTVPRect &destrect,
 	if (!LayerTreeOwner) return;
 	LayerTreeOwner->NotifyBitmapCompleted(this, destrect.left, destrect.top, bmp, cliprect, type, opacity);
 #else
-		//__android_log_print(ANDROID_LOG_INFO, "##krkr", "LMGR: DrawCompleted dst=(%d,%d-%d,%d) src=%p w=%d h=%d opa=%d",
-		//	destrect.left, destrect.top, destrect.right, destrect.bottom,
-		//	bmp, bmp ? bmp->GetWidth() : 0, bmp ? bmp->GetHeight() : 0, opacity);
     tjs_int w, h;
-		if(!/*LayerTreeOwner->*/GetPrimaryLayerSize(w, h)) { /*__android_log_print(ANDROID_LOG_INFO, "##krkr", "LMGR: no primary layer size");*/ return; }
-    //Window->GetDrawDevice()->GetSrcSize(w, h);
+	if(!GetPrimaryLayerSize(w, h)) return;
     if (!DrawBuffer) {
-        // create draw buffer
 		DrawBuffer = new tTVPDestTexture(w, h);
 		DrawBuffer->Fill(tTVPRect(0, 0, w, h), 0xFF000000);
 		static_cast<tTVPDestTexture*>(DrawBuffer)->SetHoldAlpha(HoldAlpha);
@@ -146,9 +141,8 @@ void tTVPLayerManager::DrawCompleted(const tTVPRect &destrect,
         tjs_int bw = DrawBuffer->GetWidth();
         tjs_int bh = DrawBuffer->GetHeight();
         if (bw < w || bh  < h) {
-            // insufficient size; resize the draw buffer
-            tjs_uint neww = bw > w ? bw : w, newh = bh > h ? bh : h;
-            neww += (neww & 1); // align to even
+            tjs_uint neww = bw > w ? bw:w, newh = bh > h ? bh : h;
+            neww += (neww & 1);
             DrawBuffer->SetSize(neww, newh, false);
 			DrawBuffer->Fill(tTVPRect(0, 0, neww, newh), 0xFF000000);
 		}

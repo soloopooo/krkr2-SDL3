@@ -4153,13 +4153,19 @@ void tTJSNI_BaseLayer::PiledCopy(tjs_int dx, tjs_int dy, tTJSNI_BaseLayer *src,
 	src->IncCacheEnabledCount(); // enable cache
 	try
 	{
-        iTVPBaseBitmap *bmp = src->Complete(rect);
+	iTVPBaseBitmap *bmp = src->Complete(rect);
 		tTVPRect rc(rect);
 		if (IsGPU()) {
 			rc.set_offsets(0, 0);
+			// Use Blt instead of CopyRect to avoid AssignTexture shortcut:
+			// CopyRect shares the source texture pointer instead of copying pixels,
+			// so later cache updates to the source overwrite the "snapshot".
+			ImageModified = MainImage->Blt(dx, dy, bmp, rc,
+				bmCopy, 255, true) || ImageModified;
+		} else {
+			ImageModified = MainImage->CopyRect(dx, dy, bmp, rc,
+				TVP_BB_COPY_MAIN|TVP_BB_COPY_MASK) || ImageModified;
 		}
-		ImageModified = MainImage->CopyRect(dx, dy, bmp, rc,
-			TVP_BB_COPY_MAIN|TVP_BB_COPY_MASK) || ImageModified;
 	}
 	catch(...)
 	{
@@ -6055,7 +6061,8 @@ void tTJSNI_BaseLayer::Draw_GPU(tTVPDrawable *target, int x, int y, const tTVPRe
 		}
 	} else {
 		if (GetVisibleChildrenCount() == 0) {
-			DrawSelf(target, rctar, rect);
+			if (!(Manager && Manager->GetPrimaryLayer() == this))
+				DrawSelf(target, rctar, rect);
 		} else {
 			DrawnRegion.Clear();
 			// send completion message to the target
@@ -6063,10 +6070,16 @@ void tTJSNI_BaseLayer::Draw_GPU(tTVPDrawable *target, int x, int y, const tTVPRe
 // 			if (UpdateExcludeRect.top <= rect.top && UpdateExcludeRect.bottom >= rect.bottom &&
 // 				rect.left >= UpdateExcludeRect.left && rect.right <= UpdateExcludeRect.right) {
 // 			} else 
-			{
-				tTVPRect rc(rect);
+		// Skip DrawSelf for the primary layer when it has no content to draw.
+		// The primary layer's MainImage is transparent black (cleared to 0),
+		// and drawing it via CopyColor overwrites the DrawBuffer, losing the
+		// previous frame's rendered content. This matches the software renderer's
+		// behavior where the DrawBuffer retains pixels across frames.
+		{
+			tTVPRect rc(rect);
+			if (!(Manager && Manager->GetPrimaryLayer() == this))
 				DrawSelf(target, rctar, rc);
-			}
+		}
 
 			TVP_LAYER_FOR_EACH_CHILD_BEGIN(child)
 			{
@@ -6816,7 +6829,6 @@ void tTJSNI_BaseLayer::InternalComplete(tTVPComplexRect & updateregion,
 
 	// at this point, final update region (in this completion) is determined
 	InCompletion = true;
-
 	if (IsGPU()) {
 		InternalComplete2_GPU(updateregion.GetBound(), drawable);
 	} else {
@@ -6826,6 +6838,7 @@ void tTJSNI_BaseLayer::InternalComplete(tTVPComplexRect & updateregion,
 	InCompletion = false;
 	AfterCompletion();
 }
+
 //---------------------------------------------------------------------------
 void tTJSNI_BaseLayer::CompleteForWindow(tTVPDrawable *drawable)
 {

@@ -15,6 +15,7 @@
 DisplayMode g_displayMode = DisplayMode::SOFTWARE;
 SDL_Window *g_window = nullptr;
 TVPRenderManager_GPU *TVPRenderManager_GPU::s_instance = nullptr;
+std::atomic<uint64_t> TVPRenderManager_GPU::s_totalVMem;
 
 //==============================================================================
 // Helpers
@@ -69,6 +70,7 @@ tTVPGPUTexture2D::tTVPGPUTexture2D(SDL_GPUDevice *dev, SDL_GPUTexture *tex,
 
 tTVPGPUTexture2D::~tTVPGPUTexture2D() {
 	if (m_device && m_texture) {
+		TVPRenderManager_GPU::s_totalVMem -= (uint64_t)m_texW * m_texH * 4;
 		SDL_ReleaseGPUTexture(m_device, m_texture);
 	}
 }
@@ -106,17 +108,24 @@ void tTVPGPUTexture2D::Update(const void *pixel, TVPTextureFormat::e format,
 	}
 	SDL_UnmapGPUTransferBuffer(m_device, tb);
 
-	SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(m_device);
-	if (cmd) {
-		SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cmd);
+	// End any active render pass first (Vulkan forbids copy inside render pass)
+	auto *gpuMgr = TVPRenderManager_GPU::Instance();
+	if (gpuMgr) gpuMgr->FlushPass();
+
+	// Use current frame's command buffer if available (from TVPRenderManager_GPU)
+	SDL_GPUCommandBuffer *cmd = TVPRenderManager_GPU::CurrentCmd();
+	if (!cmd) cmd = SDL_AcquireGPUCommandBuffer(m_device);
+	SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cmd);
+	if (cp) {
 		SDL_GPUTextureTransferInfo srcTI = { tb, 0 };
 		SDL_GPUTextureRegion dstReg = {};
 		dstReg.texture = m_texture;
 		dstReg.w = (Uint32)w; dstReg.h = (Uint32)h; dstReg.d = 1;
 		SDL_UploadToGPUTexture(cp, &srcTI, &dstReg, false);
 		SDL_EndGPUCopyPass(cp);
-		SDL_SubmitGPUCommandBuffer(cmd);
 	}
+	if (!TVPRenderManager_GPU::CurrentCmd())
+		SDL_SubmitGPUCommandBuffer(cmd);
 	SDL_ReleaseGPUTransferBuffer(m_device, tb);
 }
 
@@ -164,8 +173,7 @@ void tTVPGPURenderMethod::SetParameterColor4B(int id, unsigned int clr) {
 }
 
 void tTVPGPURenderMethod::SetParameterOpa(int id, int Value) {
-	m_constColor[3] = (Value & 0xFF) / 255.0f;
-	m_hasConstantColor = true;
+	m_opacity = Value & 0xFF;
 }
 
 int tTVPGPURenderMethod::EnumParameterID(const char *name) {
@@ -231,9 +239,11 @@ iTVPRenderMethod* tTVPGPURenderMethod::SetBlendFuncSeparate(int func,
 //==============================================================================
 // TVPRenderManager_GPU
 //==============================================================================
+// Vulkan: UV(0,0) = top-left, UV(1,1) = bottom-right.
+// Engine scanline 0 = top → V=0 maps to screen top.
 const float TVPRenderManager_GPU::s_quadVerts[24] = {
-	-1,-1, 0,1,   1,-1, 1,1,   -1,1, 0,0,
-	-1,1,  0,0,   1,-1, 1,1,    1,1, 1,0,
+    -1,-1, 0,1,   1,-1, 1,1,   -1,1, 0,0,
+    -1,1,  0,0,   1,-1, 1,1,    1,1, 1,0,
 };
 
 TVPRenderManager_GPU::TVPRenderManager_GPU() {
@@ -311,6 +321,7 @@ bool TVPRenderManager_GPU::Init(SDL_Window *window) {
 	sc.code = (const Uint8*)quad_fragSpv;
 	sc.code_size = quad_fragSpvSize;
 	sc.num_samplers = 1;
+	sc.num_uniform_buffers = 1;
 	m_fs = SDL_CreateGPUShader(m_device, &sc);
 
 	if (!m_vs || !m_fs) {
@@ -348,6 +359,26 @@ bool TVPRenderManager_GPU::Init(SDL_Window *window) {
 	sc2.code_size = univ_trans_fragSpvSize;
 	m_fs_univTrans = SDL_CreateGPUShader(m_device, &sc2);
 
+	// Fill shader (solid color, no texture, no UV)
+	sc2.num_samplers = 0;
+	sc2.code = (const Uint8*)fill_fragSpv;
+	sc2.code_size = fill_fragSpvSize;
+	m_fs_fill = SDL_CreateGPUShader(m_device, &sc2);
+
+	// Present shader (forces alpha=1.0 for display)
+	sc2.num_samplers = 1;
+	sc2.num_uniform_buffers = 0;
+	sc2.code = (const Uint8*)present_fragSpv;
+	sc2.code_size = present_fragSpvSize;
+	m_fs_present = SDL_CreateGPUShader(m_device, &sc2);
+
+	// Crossfade shader (2-texture blend for transitions)
+	sc2.num_samplers = 2;
+	sc2.num_uniform_buffers = 1;
+	sc2.code = (const Uint8*)crossfade_fragSpv;
+	sc2.code_size = crossfade_fragSpvSize;
+	m_fs_crossfade = SDL_CreateGPUShader(m_device, &sc2);
+
 	// Readback transfer buffers (double-buffered)
 	SDL_GPUTransferBufferCreateInfo rci = {};
 	rci.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
@@ -384,6 +415,7 @@ void TVPRenderManager_GPU::Shutdown() {
 		delete kv.second;
 	m_methodCache.clear();
 	if (m_quadPipeline) SDL_ReleaseGPUGraphicsPipeline(m_device, m_quadPipeline);
+	if (m_presentPipeline) SDL_ReleaseGPUGraphicsPipeline(m_device, m_presentPipeline);
 	if (m_quadVerts) SDL_ReleaseGPUBuffer(m_device, m_quadVerts);
 	if (m_vs) SDL_ReleaseGPUShader(m_device, m_vs);
 	if (m_fs) SDL_ReleaseGPUShader(m_device, m_fs);
@@ -391,7 +423,11 @@ void TVPRenderManager_GPU::Shutdown() {
 	if (m_fs_blur) SDL_ReleaseGPUShader(m_device, m_fs_blur);
 	if (m_fs_adjustGamma) SDL_ReleaseGPUShader(m_device, m_fs_adjustGamma);
 	if (m_fs_univTrans) SDL_ReleaseGPUShader(m_device, m_fs_univTrans);
+	if (m_fs_fill) SDL_ReleaseGPUShader(m_device, m_fs_fill);
+	if (m_fs_present) SDL_ReleaseGPUShader(m_device, m_fs_present);
+	if (m_fs_crossfade) SDL_ReleaseGPUShader(m_device, m_fs_crossfade);
 	if (m_sampler) SDL_ReleaseGPUSampler(m_device, m_sampler);
+	if (m_fallbackTex) SDL_ReleaseGPUTexture(m_device, m_fallbackTex);
 	for (int i = 0; i < READBACK_SLOTS; i++) {
 		if (m_rbSlot[i].fence) {
 			SDL_GPUFence *fencePtr = m_rbSlot[i].fence;
@@ -524,10 +560,10 @@ static MethodBlendConfig _getMethodBlend(const char *name) {
 	else if (!strcmp(name, "AlphaBlend_a") || !strcmp(name, "AlphaBlend_color_AlphaTest")
 		|| !strcmp(name, "AlphaTest")) {
 		c.enable = true;
-		c.srcC = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
-		c.dstC = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-		c.srcA = SDL_GPU_BLENDFACTOR_ONE;
-		c.dstA = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+		c.srcC = SDL_GPU_BLENDFACTOR_CONSTANT_COLOR;
+		c.dstC = SDL_GPU_BLENDFACTOR_ONE_MINUS_CONSTANT_COLOR;
+		c.srcA = SDL_GPU_BLENDFACTOR_CONSTANT_COLOR;
+		c.dstA = SDL_GPU_BLENDFACTOR_ONE_MINUS_CONSTANT_COLOR;
 	}
 	else if (!strcmp(name, "AdditiveAlphaBlend") || !strcmp(name, "AddBlend")
 		|| !strcmp(name, "ScreenBlend") || !strcmp(name, "PsAddBlend")
@@ -662,13 +698,13 @@ static MethodBlendConfig _getMethodBlend(const char *name) {
 	else if (strstr(name, "AdjustGamma") || strstr(name, "UnivTrans")) {
 		// Copy mode
 	}
-	// Framebuffer-fetch _d variants: fall back to their base blend mode
+	// Framebuffer-fetch _d variants: match base blend (use CONSTANT_COLOR)
 	else if (strstr(name, "_d")) {
 		c.enable = true;
-		c.srcC = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
-		c.dstC = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
-		c.srcA = SDL_GPU_BLENDFACTOR_ZERO;
-		c.dstA = SDL_GPU_BLENDFACTOR_ONE;
+		c.srcC = SDL_GPU_BLENDFACTOR_CONSTANT_COLOR;
+		c.dstC = SDL_GPU_BLENDFACTOR_ONE_MINUS_CONSTANT_COLOR;
+		c.srcA = SDL_GPU_BLENDFACTOR_CONSTANT_COLOR;
+		c.dstA = SDL_GPU_BLENDFACTOR_ONE_MINUS_CONSTANT_COLOR;
 	}
 	// Framebuffer-fetch _a variants: preserve destination alpha
 	else if (strstr(name, "_a")) {
@@ -706,6 +742,12 @@ tTVPGPURenderMethod* TVPRenderManager_GPU::_GetOrCreateMethod(const char *name) 
 		customFS = m_fs_adjustGamma; customShader = true; customUBO = 1;
 	} else if (strstr(name, "UnivTrans")) {
 		customFS = m_fs_univTrans; customShader = true; customSamplers = 3; customUBO = 1;
+	} else if (!strcmp(name, "FillARGB") || !strcmp(name, "FillColor") || !strcmp(name, "FillMask")) {
+		customFS = m_fs_fill; customShader = true; customSamplers = 0;
+	} else if (strstr(name, "ConstAlphaBlend_SD") || strstr(name, "ConstColorAlphaBlend_SD")) {
+		// Two-source crossfade: shader samples tex0+tex1, Copy blend
+		customFS = m_fs_crossfade; customShader = true; customSamplers = 2;
+		cfg.enable = false;
 	}
 	SDL_GPUGraphicsPipeline *pipe = _CreateQuadPipeline(m_texFormat,
 		cfg.srcC, cfg.dstC, cfg.srcA, cfg.dstA,
@@ -724,7 +766,7 @@ tTVPGPURenderMethod* TVPRenderManager_GPU::_GetOrCreateMethod(const char *name) 
 	}
 	m_methodCache[h] = m;
 	__android_log_print(ANDROID_LOG_INFO, TAG,
-		"Created GPU method: %s (blend=%d)", name, (int)cfg.enable);
+		"Created GPU method: %s (blend=%d sampler=%d)", name, (int)cfg.enable, customSamplers);
 	return m;
 }
 
@@ -770,8 +812,25 @@ iTVPTexture2D* TVPRenderManager_GPU::CreateTexture2D(const void *pixel,
 		return nullptr;
 	}
 
+	// One-time clear: fill texture with transparent black on creation
+	// so LOADOP_LOAD in SetRenderTarget preserves content across frames.
+	if (!pixel) {
+		SDL_GPUCommandBuffer *initCmd = SDL_AcquireGPUCommandBuffer(m_device);
+		if (initCmd) {
+			SDL_GPUColorTargetInfo initTi = {};
+			initTi.texture = tex;
+			initTi.load_op = SDL_GPU_LOADOP_CLEAR;
+			initTi.store_op = SDL_GPU_STOREOP_STORE;
+			initTi.clear_color = (SDL_FColor){0.0f, 0.0f, 0.0f, 0.0f};
+			SDL_GPURenderPass *initRp = SDL_BeginGPURenderPass(initCmd, &initTi, 1, NULL);
+			if (initRp) SDL_EndGPURenderPass(initRp);
+			SDL_SubmitGPUCommandBuffer(initCmd);
+		}
+	}
+
 	auto *ret = new tTVPGPUTexture2D(m_device, tex, (int)w, (int)h,
 		(int)w, (int)h, format, false);
+	s_totalVMem += (uint64_t)w * h * 4;
 
 	if (pixel) {
 		ret->Update(pixel, format, pitch,
@@ -816,6 +875,17 @@ void TVPRenderManager_GPU::SetRenderTarget(iTVPTexture2D *target) {
 		m_currentPass = nullptr;
 	}
 	m_currentTarget = target;
+	if (target) {
+		static int s_logTargets = 20;
+		if (s_logTargets > 0) {
+			s_logTargets--;
+			tTVPGPUTexture2D *gpuTex = dynamic_cast<tTVPGPUTexture2D*>(target);
+			__android_log_print(ANDROID_LOG_INFO, "##krkr", "SETRT: tar=%p isGPU=%d w=%d h=%d",
+				target, !!gpuTex,
+				target ? target->GetWidth() : 0,
+				target ? target->GetHeight() : 0);
+		}
+	}
 
 	if (!target) return;
 
@@ -847,6 +917,34 @@ void TVPRenderManager_GPU::OperateRect(iTVPRenderMethod* method,
 		return;
 	}
 
+	// Log first 120 frames; then only AlphaBlend/ConstAlpha/Copy
+	const std::string &mname = gpuMethod->GetName();
+	static int s_oprFrame = 0;
+	s_oprFrame++;
+	bool logOPR = s_oprFrame <= 30 || 
+		(mname.find("Alpha") != std::string::npos) || 
+		(mname.find("ConstAlpha") != std::string::npos) ||
+		(mname.find("Copy") != std::string::npos) ||
+		(mname.find("Fill") != std::string::npos);
+	if (logOPR && tar)
+	{
+		int tw = tar->GetWidth(), th = tar->GetHeight();
+		auto *gpuDst = dynamic_cast<tTVPGPUTexture2D*>(tar);
+		bool dstIsGPU = (gpuDst && gpuDst->GetGPUTexture());
+		void *srcTex0 = nullptr;
+		tTVPGPUTexture2D *gpuSrc = nullptr;
+		if (textures.size() > 0 && textures[0].first) {
+			srcTex0 = textures[0].first;
+			gpuSrc = dynamic_cast<tTVPGPUTexture2D*>(textures[0].first);
+		}
+		bool srcIsGPU = (gpuSrc && gpuSrc->GetGPUTexture());
+		__android_log_print(ANDROID_LOG_INFO, "##krkr", "OPR[%d]: %s nTex=%d opa=%d tar=%p(%d,%d) dstGPU=%d src=%p srcGPU=%d",
+			s_oprFrame, mname.c_str(), (int)textures.size(),
+			gpuMethod->m_opacity, tar, tw, th, (int)dstIsGPU, srcTex0, (int)srcIsGPU);
+	}
+
+
+
 	// Ensure render pass on target
 	SetRenderTarget(tar);
 	if (!m_currentPass) {
@@ -855,6 +953,9 @@ void TVPRenderManager_GPU::OperateRect(iTVPRenderMethod* method,
 	}
 
 	// Set viewport to destination rect
+	{
+		(void)0; // VIEWPORT log removed
+	}
 	SDL_GPUViewport vp = {
 		(float)rctar.left, (float)rctar.top,
 		(float)(rctar.get_width()), (float)(rctar.get_height()),
@@ -869,11 +970,57 @@ void TVPRenderManager_GPU::OperateRect(iTVPRenderMethod* method,
 	SDL_GPUBufferBinding bb = { m_quadVerts, 0 };
 	SDL_BindGPUVertexBuffers(m_currentPass, 0, &bb, 1);
 
-	// Push UBO data if dirty (AdjustGamma, UnivTrans)
-	if (gpuMethod->m_uboDirty && gpuMethod->m_uboSize > 0 && m_cmd) {
-		SDL_PushGPUFragmentUniformData(m_cmd, 0,
-			gpuMethod->m_uboData, (Uint32)gpuMethod->m_uboSize);
+	// Build UBO data
+	uint8_t uboPush[256] = {};
+
+	// Determine if hardware blend constants should be set (CONSTANT_COLOR blend)
+	bool useBlendConstants = gpuMethod->m_blendEnabled &&
+		(gpuMethod->m_srcColor == SDL_GPU_BLENDFACTOR_CONSTANT_COLOR ||
+		 gpuMethod->m_dstColor == SDL_GPU_BLENDFACTOR_CONSTANT_COLOR);
+
+	// Fill methods: push fill color (no UV/opacity)
+	if (textures.size() == 0 && gpuMethod->m_hasConstantColor) {
+		float *col = (float*)uboPush;
+		col[0] = gpuMethod->GetConstColor(0);
+		col[1] = gpuMethod->GetConstColor(1);
+		col[2] = gpuMethod->GetConstColor(2);
+		col[3] = gpuMethod->GetConstColor(3);
+		SDL_PushGPUFragmentUniformData(m_cmd, 0, uboPush, 16);
+	} else {
+	// Standard UBO: [uvOffset(8)][uvScale(8)][opacity(4)][pad(4)][methodData(0-240)]
+	float *uvF = (float*)uboPush;
+	uvF[0] = 0.0f; uvF[1] = 0.0f; uvF[2] = 1.0f; uvF[3] = 1.0f;
+	// For CONSTANT_COLOR blend: shader outputs unmodified alpha (opacity=1.0),
+	// and SDL_SetGPUBlendConstants handles the compositing.
+	uvF[4] = useBlendConstants ? 1.0f : (float)gpuMethod->m_opacity / 255.0f;
+	uvF[5] = 0.0f; // padding
+	int uboSize = 24; // 6 floats = 24 bytes for UV + opacity
+	// Adjust UV from first source texture's rect
+	if (textures.size() > 0) {
+		auto *srcTex = dynamic_cast<tTVPGPUTexture2D*>(textures[0].first);
+		if (srcTex) {
+			const tTVPRect &sr = textures[0].second;
+			float tw = (float)srcTex->GetWidth();
+			float th = (float)srcTex->GetHeight();
+			if (tw > 0 && th > 0) {
+				uvF[0] = (float)sr.left / tw;          // uvOffset.x
+				uvF[1] = (float)sr.top / th;            // uvOffset.y
+				uvF[2] = (float)sr.get_width() / tw;    // uvScale.x
+				uvF[3] = (float)sr.get_height() / th;   // uvScale.y
+				(void)0; // UV_CLIP log removed
+	if (srcTex && srcTex->GetGPUTexture() == nullptr) {
+		__android_log_print(ANDROID_LOG_WARN, "##krkr", "OPR_BUG: srcTex GPU texture is NULL! tex=%p w=%d h=%d", srcTex, srcTex->GetWidth(), srcTex->GetHeight());
+	}
+			}
+		}
+	}
+	// Append method-specific UBO data (AdjustGamma, UnivTrans)
+	if (gpuMethod->m_uboSize > 0) {
+		memcpy(uboPush + 16, gpuMethod->m_uboData, gpuMethod->m_uboSize);
+		uboSize += gpuMethod->m_uboSize;
 		gpuMethod->m_uboDirty = false;
+	}
+	SDL_PushGPUFragmentUniformData(m_cmd, 0, uboPush, (Uint32)uboSize);
 	}
 
 	// Bind source textures (up to 8)
@@ -890,8 +1037,16 @@ void TVPRenderManager_GPU::OperateRect(iTVPRenderMethod* method,
 	if (nBind > 0)
 		SDL_BindGPUFragmentSamplers(m_currentPass, 0, tsBindings, nBind);
 
+	// Set blend constants for CONSTANT_COLOR blend modes
+	if (useBlendConstants) {
+		float a = (float)gpuMethod->m_opacity / 255.0f;
+		SDL_FColor bc = { a, a, a, a };
+		SDL_SetGPUBlendConstants(m_currentPass, bc);
+	}
+
 	// Draw
 	SDL_DrawGPUPrimitives(m_currentPass, 6, 1, 0, 0);
+	m_drawCount++;
 }
 
 //------------------------------------------------------------------------------
@@ -919,13 +1074,17 @@ void TVPRenderManager_GPU::OperatePerspective(iTVPRenderMethod* method,
 //------------------------------------------------------------------------------
 bool TVPRenderManager_GPU::GetRenderStat(unsigned int &drawCount,
 	uint64_t &vmemsize) {
-	drawCount = 0; vmemsize = 0;
+	drawCount = m_drawCount; m_drawCount = 0; vmemsize = s_totalVMem.load();
 	return true;
 }
 
 //------------------------------------------------------------------------------
 // Frame lifecycle — public
 //------------------------------------------------------------------------------
+void TVPRenderManager_GPU::FlushPass() {
+	_EndFramePass();
+}
+
 void TVPRenderManager_GPU::BeginFrame() {
 	_BeginFrame();
 }
@@ -935,14 +1094,18 @@ void TVPRenderManager_GPU::EndFrame() {
 
 	// ---- Step 1: Process previous readback (fence is done) ----
 	int prevSlot = m_rbActive ^ 1;
+	bool rbReady = false;
 	if (m_rbSlot[prevSlot].fence) {
-		// Non-blocking check: skip if still pending
+		// Wait for previous frame's readback to complete
 		SDL_GPUFence *fencePtr = m_rbSlot[prevSlot].fence;
 		SDL_WaitForGPUFences(m_device, true, &fencePtr, 1);
+		// SDL_WaitForGPUFences does NOT destroy or null the pointer,
+		// so we release it here and mark readback as ready.
+		SDL_ReleaseGPUFence(m_device, m_rbSlot[prevSlot].fence);
+		m_rbSlot[prevSlot].fence = nullptr;
+		rbReady = true;
 	}
-	if (m_rbSlot[prevSlot].fence) {
-		// Readback still pending from last frame — skip processing
-	} else if (m_rbSlot[prevSlot].tb && m_rbSlot[prevSlot].texW > 0) {
+	if (rbReady && m_rbSlot[prevSlot].tb && m_rbSlot[prevSlot].texW > 0) {
 		// Fence is signaled — map and copy
 		void *map = SDL_MapGPUTransferBuffer(m_device,
 			m_rbSlot[prevSlot].tb, true);
@@ -995,31 +1158,56 @@ void TVPRenderManager_GPU::EndFrame() {
 	if (m_swapchainTex) {
 		SDL_GPUColorTargetInfo tg = {};
 		tg.texture = m_swapchainTex;
-		tg.load_op = SDL_GPU_LOADOP_CLEAR;
+		tg.load_op = SDL_GPU_LOADOP_CLEAR;  // clear each frame to prevent swapchain flicker
 		tg.store_op = SDL_GPU_STOREOP_STORE;
-		tg.clear_color = (SDL_FColor){0.0f, 0.3f, 0.6f, 1.0f};
+		tg.clear_color = (SDL_FColor){0.0f, 0.0f, 0.0f, 1.0f};
 		SDL_GPURenderPass *rp = SDL_BeginGPURenderPass(m_cmd, &tg, 1, NULL);
 		if (rp) {
-			if (!m_quadPipeline) {
-				m_quadPipeline = _CreateQuadPipeline(m_swapFormat,
+			if (!m_presentPipeline) {
+				m_presentPipeline = _CreateQuadPipeline(m_swapFormat,
 					SDL_GPU_BLENDFACTOR_ONE, SDL_GPU_BLENDFACTOR_ZERO,
 					SDL_GPU_BLENDFACTOR_ONE, SDL_GPU_BLENDFACTOR_ZERO,
-					SDL_GPU_BLENDOP_ADD, SDL_GPU_BLENDOP_ADD, false);
+					SDL_GPU_BLENDOP_ADD, SDL_GPU_BLENDOP_ADD, false,
+					m_fs_present, 1, 0);
+				if (!m_presentPipeline)
+					__android_log_print(ANDROID_LOG_ERROR, "##krkr", "FAILED to create swapchain present pipeline");
+				else
+					__android_log_print(ANDROID_LOG_INFO, "##krkr", "Present pipeline created");
 			}
-			SDL_GPUViewport vp = {0,0,(float)m_swW,(float)m_swH,0,1};
-			SDL_SetGPUViewport(rp, &vp);
-			SDL_BindGPUGraphicsPipeline(rp, m_quadPipeline);
-			SDL_GPUBufferBinding bb = { m_quadVerts, 0 };
-			SDL_BindGPUVertexBuffers(rp, 0, &bb, 1);
+			// Determine which texture to present: GPU render target or fallback from CPU
+			SDL_GPUTexture *presentTex = nullptr;
+			float gameW = 0, gameH = 0;
 			if (readbackTex) {
 				tTVPGPUTexture2D *gpuTex = dynamic_cast<tTVPGPUTexture2D*>(readbackTex);
 				if (gpuTex && gpuTex->GetGPUTexture() &&
 					m_swapchainTex != gpuTex->GetGPUTexture()) {
-					SDL_GPUTextureSamplerBinding ts = { gpuTex->GetGPUTexture(), m_sampler };
-					SDL_BindGPUFragmentSamplers(rp, 0, &ts, 1);
+					presentTex = gpuTex->GetGPUTexture();
+					gameW = (float)gpuTex->GetWidth();
+					gameH = (float)gpuTex->GetHeight();
 				}
 			}
-			SDL_DrawGPUPrimitives(rp, 6, 1, 0, 0);
+			if (!presentTex && m_fallbackTex && m_fallbackW > 0) {
+				presentTex = m_fallbackTex;
+				gameW = (float)m_fallbackW;
+				gameH = (float)m_fallbackH;
+			}
+			if (m_presentPipeline && presentTex) {
+				float vpX = 0, vpY = 0, vpW = (float)m_swW, vpH = (float)m_swH;
+				extern bool g_fullscreenStretch;
+				if (!g_fullscreenStretch && gameW > 0 && gameH > 0) {
+					float scale = fminf(vpW / gameW, vpH / gameH);
+					vpW = gameW * scale; vpH = gameH * scale;
+					vpX = (m_swW - vpW) * 0.5f; vpY = (m_swH - vpH) * 0.5f;
+				}
+				SDL_GPUViewport vp = {vpX, vpY, vpW, vpH, 0, 1};
+				SDL_SetGPUViewport(rp, &vp);
+				SDL_BindGPUGraphicsPipeline(rp, m_presentPipeline);
+				SDL_GPUBufferBinding bb = { m_quadVerts, 0 };
+				SDL_BindGPUVertexBuffers(rp, 0, &bb, 1);
+				SDL_GPUTextureSamplerBinding ts = { presentTex, m_sampler };
+				SDL_BindGPUFragmentSamplers(rp, 0, &ts, 1);
+				SDL_DrawGPUPrimitives(rp, 6, 1, 0, 0);
+			}
 			SDL_EndGPURenderPass(rp);
 		}
 	}
@@ -1045,7 +1233,8 @@ void TVPRenderManager_GPU::_BeginFrame() {
 		&m_swapchainTex, &m_swW, &m_swH);
 	// swapchainTex may be null if window minimized
 	m_currentPass = nullptr;
-	m_currentTarget = nullptr;
+	// Don't clear m_currentTarget — keep last frame's composited texture for idle frames
+	m_frameFirstTarget = true;
 }
 
 void TVPRenderManager_GPU::_EndFramePass() {
@@ -1079,11 +1268,98 @@ void TVPRenderManager_GPU::_PresentToSwapchain() {
 	SDL_EndGPURenderPass(rp);
 }
 
+void TVPRenderManager_GPU::SetFallbackDisplay(const void *pixels, int w, int h) {
+	if (!m_device || !m_cmd || !pixels || w <= 0 || h <= 0) return;
+	// Always create new texture (avoids layout transition issues across frames)
+	if (m_fallbackTex) {
+		SDL_ReleaseGPUTexture(m_device, m_fallbackTex);
+		m_fallbackTex = nullptr;
+	}
+	SDL_GPUTextureCreateInfo ti = {};
+	ti.type = SDL_GPU_TEXTURETYPE_2D;
+	ti.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+	ti.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+	ti.width = (Uint32)w; ti.height = (Uint32)h;
+	ti.layer_count_or_depth = 1; ti.num_levels = 1;
+	ti.sample_count = SDL_GPU_SAMPLECOUNT_1;
+	m_fallbackTex = SDL_CreateGPUTexture(m_device, &ti);
+	if (!m_fallbackTex) return;
+	m_fallbackW = w; m_fallbackH = h;
+	SDL_GPUTransferBufferCreateInfo tci = {};
+	tci.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+	tci.size = (Uint32)(w * h * 4);
+	SDL_GPUTransferBuffer *tb = SDL_CreateGPUTransferBuffer(m_device, &tci);
+	if (!tb) return;
+	void *map = SDL_MapGPUTransferBuffer(m_device, tb, false);
+	if (map) memcpy(map, pixels, (size_t)(w * h * 4));
+	SDL_UnmapGPUTransferBuffer(m_device, tb);
+	_EndFramePass();
+	SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(m_cmd);
+	if (cp) {
+		SDL_GPUTextureTransferInfo srcTI = { tb, 0 };
+		SDL_GPUTextureRegion dstReg = {};
+		dstReg.texture = m_fallbackTex;
+		dstReg.w = (Uint32)w; dstReg.h = (Uint32)h; dstReg.d = 1;
+		SDL_UploadToGPUTexture(cp, &srcTI, &dstReg, false);
+		SDL_EndGPUCopyPass(cp);
+	}
+	SDL_ReleaseGPUTransferBuffer(m_device, tb);
+}
+
 void TVPRenderManager_GPU::ReadbackAndPresent(iTVPTexture2D *finalTex) {
 	if (!m_device) return;
 	if (finalTex) m_currentTarget = finalTex;
 	BeginFrame();
 	EndFrame();
+}
+
+//------------------------------------------------------------------------------
+// ReadbackPixel — synchronous GPU pixel readback for diagnostics
+// Uses a separate command buffer to avoid interfering with main rendering.
+//------------------------------------------------------------------------------
+uint32_t TVPRenderManager_GPU::ReadbackPixel(SDL_GPUTexture *tex, int x, int y) {
+	if (!m_device || !tex) return 0;
+
+	// Use a separate command buffer to not disturb m_cmd
+	SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(m_device);
+	if (!cmd) return 0;
+
+	SDL_GPUTransferBufferCreateInfo tci = {};
+	tci.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+	tci.size = 4;
+	SDL_GPUTransferBuffer *tb = SDL_CreateGPUTransferBuffer(m_device, &tci);
+	if (!tb) {
+		SDL_CancelGPUCommandBuffer(cmd);
+		return 0;
+	}
+
+	uint32_t pixel = 0;
+	SDL_GPUTextureRegion srcReg = {};
+	srcReg.texture = tex;
+	srcReg.x = (Uint32)x; srcReg.y = (Uint32)y;
+	srcReg.w = 1; srcReg.h = 1; srcReg.d = 1;
+	SDL_GPUTextureTransferInfo dstTI = { tb, 0 };
+
+	SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cmd);
+	if (cp) {
+		SDL_DownloadFromGPUTexture(cp, &srcReg, &dstTI);
+		SDL_EndGPUCopyPass(cp);
+		SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
+		if (fence) {
+			SDL_WaitForGPUFences(m_device, true, &fence, 1);
+			SDL_ReleaseGPUFence(m_device, fence);
+			void *map = SDL_MapGPUTransferBuffer(m_device, tb, true);
+			if (map) {
+				memcpy(&pixel, map, 4);
+				SDL_UnmapGPUTransferBuffer(m_device, tb);
+			}
+		}
+	} else {
+		// Can't begin copy pass — just discard the cmd buffer
+		SDL_SubmitGPUCommandBuffer(cmd);
+	}
+	SDL_ReleaseGPUTransferBuffer(m_device, tb);
+	return pixel;
 }
 
 //------------------------------------------------------------------------------
@@ -1094,13 +1370,13 @@ extern "C" void TVPRegisterGPURenderer() {
 	if (!registered) {
 		TVPRegisterRenderManager("gpu",
 			[]() -> iTVPRenderManager* {
-				// Return existing initialized instance (created by SDL_main)
-				// to avoid creating a second uninitialized instance.
 				auto *inst = TVPRenderManager_GPU::Instance();
 				if (inst && inst->IsReady()) {
 					return inst;
 				}
-				return new TVPRenderManager_GPU;
+				// No initialized GPU renderer available — return nullptr so
+				// TVPGetRenderManager() falls back to "software".
+				return nullptr;
 			});
 		registered = true;
 	}
