@@ -32,8 +32,8 @@ android {
                 }
             }
         }
-        versionCode 1
-        versionName "1.4.0beta"
+        versionCode 2
+        versionName "2.0.0alpha"
     }
     signingConfigs {
         debug {

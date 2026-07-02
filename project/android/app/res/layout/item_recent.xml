@@ -46,6 +46,18 @@
 		app:iconTint="@color/primary" />
 
 	<com.google.android.material.button.MaterialButton
+		android:id="@+id/recentFolder"
+		style="@style/Widget.Material3.Button.TextButton"
+		android:layout_width="40dp"
+		android:layout_height="40dp"
+		android:insetTop="0dp"
+		android:insetBottom="0dp"
+		android:layout_marginStart="4dp"
+		app:icon="@drawable/ic_folder"
+		app:iconSize="18dp"
+		app:iconTint="@color/on_surface_variant" />
+
+	<com.google.android.material.button.MaterialButton
 		android:id="@+id/recentDelete"
 		style="@style/Widget.Material3.Button.TextButton"
 		android:layout_width="40dp"

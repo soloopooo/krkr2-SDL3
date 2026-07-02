@@ -16,6 +16,7 @@ class RecentAdapter extends RecyclerView.Adapter<RecentAdapter.ViewHolder> {
 
 	interface OnRecentClickListener {
 		void onPlay(String path);
+		void onFolder(String path);
 		void onDelete(String path);
 	}
 
@@ -43,6 +44,7 @@ class RecentAdapter extends RecyclerView.Adapter<RecentAdapter.ViewHolder> {
 		h.name.setText(gameName);
 		h.path.setText(path);
 		h.playBtn.setOnClickListener(v -> mListener.onPlay(path));
+		h.folderBtn.setOnClickListener(v -> mListener.onFolder(path));
 		h.deleteBtn.setOnClickListener(v -> mListener.onDelete(path));
 	}
 
@@ -63,13 +65,14 @@ class RecentAdapter extends RecyclerView.Adapter<RecentAdapter.ViewHolder> {
 	}
 
 	static class ViewHolder extends RecyclerView.ViewHolder {
-		TextView name, path, playBtn, deleteBtn;
+		TextView name, path, playBtn, folderBtn, deleteBtn;
 
 		ViewHolder(View v) {
 			super(v);
 			name = v.findViewById(R.id.recentName);
 			path = v.findViewById(R.id.recentPath);
 			playBtn = v.findViewById(R.id.recentPlay);
+			folderBtn = v.findViewById(R.id.recentFolder);
 			deleteBtn = v.findViewById(R.id.recentDelete);
 		}
 	}

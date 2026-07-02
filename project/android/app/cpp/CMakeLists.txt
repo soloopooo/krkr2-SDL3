@@ -11,7 +11,7 @@ else()
 endif()
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g")
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O2 -g -fno-strict-aliasing -fno-delete-null-pointer-checks")
 endif()
 
 add_subdirectory(${KRKR2YURI_DIR} ${KRKR2YURI_DIR}/build_android)

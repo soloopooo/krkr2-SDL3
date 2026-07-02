@@ -55,6 +55,9 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+
+import org.xmlpull.v1.XmlPullParser;
+import org.xmlpull.v1.XmlPullParserFactory;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.lang.reflect.InvocationTargetException;
@@ -115,6 +118,7 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
 	static ActivityManager mAcitivityManager = null;
 	static Debug.MemoryInfo mDbgMemoryInfo = new Debug.MemoryInfo();
 	public static void updateMemoryInfo() {
+		if (sInstance == null) return;
 		if(mAcitivityManager == null) {
 			mAcitivityManager =(ActivityManager)sInstance.getSystemService(Activity.ACTIVITY_SERVICE);
 		}
@@ -241,6 +245,13 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
 				nativeSetStartupArgs(startupPath, args);
 			}
 		}
+
+		// Read display backend preference from GlobalPreference.xml.
+		// This determines whether to use Vulkan GPU or SDL_Renderer display.
+		// The preference is set by SettingsActivity and must be read before
+		// SDL_main runs, since the display backend cannot be switched at runtime.
+		String displayBackend = readGlobalPref("renderer", "vulkan");
+		nativeSetDisplayBackend(displayBackend);
 
 		// Floating game menu overlay (draggable button + popup menu)
 		GameMenuOverlay.attach(this);
@@ -965,6 +976,7 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
             public void run() {
                 if (show && mDebugOverlay == null) {
                     mDebugOverlay = new TextView(sInstance);
+                    mDebugOverlay.setTypeface(android.graphics.Typeface.MONOSPACE);
                     mDebugOverlay.setTextColor(Color.argb(220, 255, 255, 255));
                     mDebugOverlay.setTextSize(12);
                     mDebugOverlay.setShadowLayer(2, 1, 1, Color.argb(200, 0, 0, 0));
@@ -1052,6 +1064,7 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
     private static native void nativeSetSafTreeUri(String uri);
     private static native String nativeGetSafTreeUri();
     private static native void nativeSetStartupArgs(String startupPath, String[] args);
+    private static native void nativeSetDisplayBackend(String backend);
     void hideSystemUI() {
     	if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
     		doSetSystemUiVisibility();
@@ -1063,6 +1076,33 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
     	if (ctx == null) return "";
     	java.io.File extDir = ctx.getExternalFilesDir(null);
     	return extDir != null ? extDir.getAbsolutePath() : "";
+    }
+
+    // Read a key from GlobalPreference.xml (same file SettingsActivity writes to).
+    // Returns defaultValue if file is missing or key is not found.
+    private String readGlobalPref(String key, String defaultValue) {
+    	try {
+    		File base = getExternalFilesDir(null);
+    		if (base == null) return defaultValue;
+    		File prefFile = new File(base, ".preference/GlobalPreference.xml");
+    		if (!prefFile.exists()) return defaultValue;
+    		FileInputStream is = new FileInputStream(prefFile);
+    		XmlPullParser parser = XmlPullParserFactory.newInstance().newPullParser();
+    		parser.setInput(is, "UTF-8");
+    		int event;
+    		while ((event = parser.next()) != XmlPullParser.END_DOCUMENT) {
+    			if (event == XmlPullParser.START_TAG && "Item".equals(parser.getName())) {
+    				String k = parser.getAttributeValue(null, "key");
+    				String v = parser.getAttributeValue(null, "value");
+    				if (key.equals(k) && v != null) {
+    					is.close();
+    					return v;
+    				}
+    			}
+    		}
+    		is.close();
+    	} catch (Exception ignored) {}
+    	return defaultValue;
     }
 
     static public String getInternalStoragePath() {

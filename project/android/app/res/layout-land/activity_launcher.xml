@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	xmlns:app="http://schemas.android.com/apk/res-auto"
+	android:layout_width="match_parent"
+	android:layout_height="match_parent"
+	android:orientation="vertical"
+	android:background="?attr/colorSurface">
+
+	<com.google.android.material.appbar.MaterialToolbar
+		android:id="@+id/toolbar"
+		android:layout_width="match_parent"
+		android:layout_height="?attr/actionBarSize"
+		android:background="?attr/colorPrimary"
+		app:title="Kirikiroid2-Yuri"
+		app:titleTextColor="@color/on_primary"
+		app:subtitleTextColor="@color/on_primary"
+		app:subtitle="Select a game">
+
+		<LinearLayout
+			android:layout_width="wrap_content"
+			android:layout_height="match_parent"
+			android:orientation="horizontal"
+			android:layout_gravity="end">
+
+			<com.google.android.material.button.MaterialButton
+				android:id="@+id/btnSettings"
+				style="@style/Widget.Material3.Button.TextButton"
+				android:layout_width="40dp"
+				android:layout_height="40dp"
+				android:layout_gravity="center"
+				android:insetTop="0dp"
+				android:insetBottom="0dp"
+				app:icon="@drawable/ic_settings"
+				app:iconSize="20dp"
+				app:iconTint="@color/on_primary" />
+
+			<com.google.android.material.button.MaterialButton
+				android:id="@+id/btnLogcat"
+				style="@style/Widget.Material3.Button.TextButton"
+				android:layout_width="40dp"
+				android:layout_height="40dp"
+				android:layout_gravity="center"
+				android:insetTop="0dp"
+				android:insetBottom="0dp"
+				app:icon="@drawable/ic_refresh"
+				app:iconSize="18dp"
+				app:iconTint="@color/on_primary" />
+
+			<com.google.android.material.button.MaterialButton
+				android:id="@+id/btnAbout"
+				style="@style/Widget.Material3.Button.TextButton"
+				android:layout_width="40dp"
+				android:layout_height="40dp"
+				android:layout_gravity="center"
+				android:insetTop="0dp"
+				android:insetBottom="0dp"
+				app:icon="@drawable/ic_info"
+				app:iconSize="20dp"
+				app:iconTint="@color/on_primary" />
+		</LinearLayout>
+	</com.google.android.material.appbar.MaterialToolbar>
+
+	<HorizontalScrollView
+		android:id="@+id/breadcrumbScroll"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:scrollbars="none"
+		android:background="?attr/colorSurfaceVariant"
+		android:paddingStart="12dp"
+		android:paddingEnd="12dp">
+
+		<LinearLayout
+			android:id="@+id/breadcrumbContainer"
+			android:layout_width="wrap_content"
+			android:layout_height="wrap_content"
+			android:orientation="horizontal"
+			android:gravity="center_vertical" />
+	</HorizontalScrollView>
+
+	<LinearLayout
+		android:layout_width="match_parent"
+		android:layout_height="0dp"
+		android:layout_weight="1"
+		android:orientation="horizontal">
+
+		<androidx.recyclerview.widget.RecyclerView
+			android:id="@+id/fileList"
+			android:layout_width="0dp"
+			android:layout_height="match_parent"
+			android:layout_weight="2"
+			android:background="?attr/colorSurface" />
+
+		<com.google.android.material.card.MaterialCardView
+			android:id="@+id/recentCard"
+			android:layout_width="0dp"
+			android:layout_height="match_parent"
+			android:layout_weight="1"
+			android:layout_margin="4dp"
+			android:visibility="gone"
+			app:cardCornerRadius="12dp"
+			app:cardElevation="2dp"
+			app:strokeWidth="0dp">
+
+			<LinearLayout
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:orientation="vertical">
+
+				<TextView
+					android:layout_width="match_parent"
+					android:layout_height="wrap_content"
+					android:padding="12dp"
+					android:paddingBottom="4dp"
+					android:text="Recent Games"
+					android:textSize="13sp"
+					android:textColor="?attr/colorPrimary"
+					android:textStyle="bold" />
+
+				<androidx.recyclerview.widget.RecyclerView
+					android:id="@+id/recentList"
+					android:layout_width="match_parent"
+					android:layout_height="wrap_content"
+					android:nestedScrollingEnabled="false" />
+			</LinearLayout>
+		</com.google.android.material.card.MaterialCardView>
+	</LinearLayout>
+
+	<com.google.android.material.divider.MaterialDivider
+		android:layout_width="match_parent"
+		android:layout_height="1dp" />
+
+	<LinearLayout
+		android:layout_width="match_parent"
+		android:layout_height="56dp"
+		android:orientation="horizontal"
+		android:background="?attr/colorSurfaceVariant"
+		android:gravity="center">
+
+		<com.google.android.material.button.MaterialButton
+			android:id="@+id/btnDownload"
+			style="@style/Widget.Material3.Button.TonalButton"
+			android:layout_width="0dp"
+			android:layout_height="40dp"
+			android:layout_weight="1"
+			android:layout_margin="4dp"
+			android:text="Download"
+			android:textSize="13sp" />
+
+		<com.google.android.material.button.MaterialButton
+			android:id="@+id/btnRoot"
+			style="@style/Widget.Material3.Button.TonalButton"
+			android:layout_width="0dp"
+			android:layout_height="40dp"
+			android:layout_weight="1"
+			android:layout_margin="4dp"
+			android:text="Internal"
+			android:textSize="13sp" />
+	</LinearLayout>
+</LinearLayout>

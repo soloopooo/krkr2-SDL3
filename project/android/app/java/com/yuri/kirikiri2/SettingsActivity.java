@@ -77,11 +77,12 @@ public class SettingsActivity extends AppCompatActivity {
 		mSetForceDefFont.setOnCheckedChangeListener((b, v) -> save("force_default_font", v));
 
 		mBtnFps.setOnClickListener(v -> {
-			String[] items = {"120", "90", "75", "60", "45", "30", "15"};
+			String[] items = {"0", "120", "90", "75", "60", "45", "30", "15"};
+			String[] labels = {"Unlimited", "120", "90", "75", "60", "45", "30", "15"};
 			new AlertDialog.Builder(this)
 				.setTitle("FPS Limit")
-				.setItems(items, (d, i) -> {
-					mBtnFps.setText(items[i]);
+				.setItems(labels, (d, i) -> {
+					mBtnFps.setText(labels[i]);
 					save("fps_limit", items[i]);
 				})
 				.show();

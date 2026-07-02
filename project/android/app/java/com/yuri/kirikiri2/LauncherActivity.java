@@ -55,56 +55,7 @@ public class LauncherActivity extends AppCompatActivity {
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.activity_launcher);
-
-		Toolbar toolbar = findViewById(R.id.toolbar);
-		toolbar.setSubtitle("Select a game");
-		setSupportActionBar(toolbar);
-
-		mBreadcrumbContainer = findViewById(R.id.breadcrumbContainer);
-		mBreadcrumbScroll = findViewById(R.id.breadcrumbScroll);
-		mRecentCard = findViewById(R.id.recentCard);
-
-		mAdapter = new FileAdapter(mFiles,
-			entry -> {
-				if (entry.isDirectory) {
-					loadDir(new File(entry.fullPath));
-			} else if (entry.isGame) {
-				addRecent(entry.fullPath);
-				startGame(entry.fullPath);
-			} else if (entry.isVideo) {
-				Intent intent = new Intent(this, VideoPlayerActivity.class);
-				intent.putExtra("videoPath", entry.fullPath);
-				startActivity(intent);
-			} else if (entry.isImage || entry.isText) {
-				Intent intent = new Intent(this, ViewerActivity.class);
-				intent.putExtra("filePath", entry.fullPath);
-				startActivity(intent);
-			}
-		},
-			(entry, pos) -> showFileMenu(entry, pos)
-		);
-
-		mFileList = findViewById(R.id.fileList);
-		mFileList.setLayoutManager(new LinearLayoutManager(this));
-		mFileList.setAdapter(mAdapter);
-
-		mRecentList = findViewById(R.id.recentList);
-		mRecentList.setLayoutManager(new LinearLayoutManager(this));
-		mRecentAdapter = new RecentAdapter(mRecentPaths,
-			new RecentAdapter.OnRecentClickListener() {
-				@Override
-				public void onPlay(String path) {
-					addRecent(path);
-					startGame(path);
-				}
-				@Override
-				public void onDelete(String path) {
-					mRecentPaths.remove(path);
-					mRecentAdapter.setPaths(mRecentPaths);
-					saveRecent();
-				}
-			});
-		mRecentList.setAdapter(mRecentAdapter);
+		initViews();
 
 		// Quick-access buttons
 		findViewById(R.id.btnDownload).setOnClickListener(v ->
@@ -123,7 +74,6 @@ public class LauncherActivity extends AppCompatActivity {
 
 		// Determine startup directory
 		File startDir = null;
-		// 1. Check saved last_path if remember_last_path is enabled
 		boolean rem = getBoolFromPref("remember_last_path", true);
 		if (rem) {
 			String saved = getSharedPreferences("launcher", MODE_PRIVATE)
@@ -133,12 +83,81 @@ public class LauncherActivity extends AppCompatActivity {
 				if (f.isDirectory()) startDir = f;
 			}
 		}
-		// 2. Fallback to /storage/emulated/0 or internal
 		if (startDir == null) {
 			startDir = new File("/storage/emulated/0");
 			if (!startDir.isDirectory()) startDir = getExternalFilesDir(null);
 		}
 		if (startDir != null) loadDir(startDir);
+	}
+
+	@Override
+	public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+		super.onConfigurationChanged(newConfig);
+		setContentView(R.layout.activity_launcher);
+		initViews();
+		updateBreadcrumbs(mCurrentDir);
+		refreshRecentCard();
+	}
+
+	private void initViews() {
+		Toolbar toolbar = findViewById(R.id.toolbar);
+		toolbar.setSubtitle("Select a game");
+		setSupportActionBar(toolbar);
+
+		mBreadcrumbContainer = findViewById(R.id.breadcrumbContainer);
+		mBreadcrumbScroll = findViewById(R.id.breadcrumbScroll);
+		mRecentCard = findViewById(R.id.recentCard);
+
+		if (mAdapter == null) {
+			mAdapter = new FileAdapter(mFiles,
+				entry -> {
+					if (entry.isDirectory) {
+						loadDir(new File(entry.fullPath));
+				} else if (entry.isGame) {
+					addRecent(entry.fullPath);
+					startGame(entry.fullPath);
+				} else if (entry.isVideo) {
+					Intent intent = new Intent(this, VideoPlayerActivity.class);
+					intent.putExtra("videoPath", entry.fullPath);
+					startActivity(intent);
+				} else if (entry.isImage || entry.isText) {
+					Intent intent = new Intent(this, ViewerActivity.class);
+					intent.putExtra("filePath", entry.fullPath);
+					startActivity(intent);
+				}
+			},
+				(entry, pos) -> showFileMenu(entry, pos)
+			);
+		}
+
+		mFileList = findViewById(R.id.fileList);
+		mFileList.setLayoutManager(new LinearLayoutManager(this));
+		mFileList.setAdapter(mAdapter);
+
+		mRecentList = findViewById(R.id.recentList);
+		mRecentList.setLayoutManager(new LinearLayoutManager(this));
+		if (mRecentAdapter == null) {
+			mRecentAdapter = new RecentAdapter(mRecentPaths,
+				new RecentAdapter.OnRecentClickListener() {
+					@Override
+					public void onPlay(String path) {
+						addRecent(path);
+						startGame(path);
+					}
+					@Override
+					public void onFolder(String path) {
+						File f = new File(path);
+						loadDir(f.isFile() ? f.getParentFile() : f);
+					}
+					@Override
+					public void onDelete(String path) {
+						mRecentPaths.remove(path);
+						mRecentAdapter.setPaths(mRecentPaths);
+						saveRecent();
+					}
+				});
+		}
+		mRecentList.setAdapter(mRecentAdapter);
 	}
 
 	//--------------------------------------------------------------------------
