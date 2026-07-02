@@ -16,6 +16,10 @@ bool g_VulkanDisplayActive = false;
 
 #include "WindowLayer_sdl.h"
 #include "tjsCommHead.h"
+
+// Debug capture mode
+extern bool IsCaptureMode();
+extern void SetCaptureMode(bool on);
 #include "Application.h"
 #include "TickCount.h"
 #include "EventIntf.h"
@@ -294,7 +298,7 @@ static void DumpBMP(const uint32_t *pixels, int w, int h) {
 			dst[0] = (uint8_t)(px >> 16); // B
 			dst[1] = (uint8_t)(px >> 8);  // G
 			dst[2] = (uint8_t)(px);       // R
-			dst[3] = 0xFF;                // A
+			dst[3] = (uint8_t)(px >> 24); // A
 			dst += 4;
 		}
 	}
@@ -737,7 +741,7 @@ void TVPEngineTick() {
 		}
 	}
 
-	// Frame rate limiting
+	// Frame rate limiting (1 FPS when capture mode is active)
 	{
 		static int s_fpsLimit = 60;
 		static int s_refreshCounter = 0;
@@ -746,6 +750,7 @@ void TVPEngineTick() {
 			s_refreshCounter = 0;
 			s_fpsLimit = GlobalConfigManager::GetInstance()->GetValue<int>("fps_limit", 60);
 		}
+		if (IsCaptureMode()) s_fpsLimit = 1;
 		auto frameElapsed = std::chrono::duration_cast<std::chrono::microseconds>(
 			std::chrono::steady_clock::now() - tickStart).count();
 		int targetUs = s_fpsLimit > 0 ? (1000000 / s_fpsLimit) : 0;
@@ -764,13 +769,14 @@ void TVPEngineTick() {
 	if (elapsed >= 1000) {
 		int totalFps = g_stats.frameCount * 1000 / (elapsed ? elapsed : 1);
 		int avgTickUs = g_stats.frameCount ? (int)(g_stats.tickTotalUs / g_stats.frameCount) : 0;
-		__android_log_print(ANDROID_LOG_INFO, TAG, "ENGINE: %dfps %d/%d draws avg%04dus %dx%d",
-			totalFps, g_stats.framesWithDraws, g_stats.frameCount, avgTickUs, g_gameW, g_gameH);
-		g_stats = { std::chrono::steady_clock::now(), 0, 0, 0, 0 };
-	}
+			__android_log_print(ANDROID_LOG_INFO, TAG, "ENGINE: %dfps%s %d/%d draws avg%04dus %dx%d",
+				totalFps, IsCaptureMode() ? " CAP" : "",
+				g_stats.framesWithDraws, g_stats.frameCount, avgTickUs, g_gameW, g_gameH);
+			g_stats = { std::chrono::steady_clock::now(), 0, 0, 0, 0 };
+		}
 
-	// Android native overlay (FPS/memory) — works for both Software and Vulkan modes
-	_updateDebugOverlayJNI(false, activeDraws, vramSize);
+		// Android native overlay (FPS/memory) — works for both Software and Vulkan modes
+		_updateDebugOverlayJNI(false, activeDraws, vramSize);
 	TVPUpdateCursorOverlay();
 }
 

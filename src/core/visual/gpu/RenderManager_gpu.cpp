@@ -17,6 +17,11 @@ SDL_Window *g_window = nullptr;
 TVPRenderManager_GPU *TVPRenderManager_GPU::s_instance = nullptr;
 std::atomic<uint64_t> TVPRenderManager_GPU::s_totalVMem;
 
+// Debug capture mode (toggle from Java overlay)
+static bool s_captureMode = false;
+void SetCaptureMode(bool on) { s_captureMode = on; }
+bool IsCaptureMode() { return s_captureMode; }
+
 //==============================================================================
 // Helpers
 //==============================================================================
@@ -698,21 +703,22 @@ static MethodBlendConfig _getMethodBlend(const char *name) {
 	else if (strstr(name, "AdjustGamma") || strstr(name, "UnivTrans")) {
 		// Copy mode
 	}
-	// Framebuffer-fetch _d variants: match base blend (use CONSTANT_COLOR)
-	else if (strstr(name, "_d")) {
+	// _d variants: alpha blending with destination alpha preservation
+	// (SRC_ALPHA/ONE_MINUS_SRC_ALPHA for both RGB and A)
+	else if (strstr(name, "_d") && !strstr(name, "SD")) {
 		c.enable = true;
-		c.srcC = SDL_GPU_BLENDFACTOR_CONSTANT_COLOR;
-		c.dstC = SDL_GPU_BLENDFACTOR_ONE_MINUS_CONSTANT_COLOR;
-		c.srcA = SDL_GPU_BLENDFACTOR_CONSTANT_COLOR;
-		c.dstA = SDL_GPU_BLENDFACTOR_ONE_MINUS_CONSTANT_COLOR;
+		c.srcC = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+		c.dstC = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+		c.srcA = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+		c.dstA = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
 	}
-	// Framebuffer-fetch _a variants: preserve destination alpha
-	else if (strstr(name, "_a")) {
+	// _a variants: additive alpha blending (SRC_ALPHA/ONE)
+	else if (strstr(name, "_a") && !strstr(name, "SD")) {
 		c.enable = true;
-		c.srcC = SDL_GPU_BLENDFACTOR_CONSTANT_COLOR;
-		c.dstC = SDL_GPU_BLENDFACTOR_ONE_MINUS_CONSTANT_COLOR;
-		c.srcA = SDL_GPU_BLENDFACTOR_CONSTANT_COLOR;
-		c.dstA = SDL_GPU_BLENDFACTOR_ONE_MINUS_CONSTANT_COLOR;
+		c.srcC = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+		c.dstC = SDL_GPU_BLENDFACTOR_ONE;
+		c.srcA = SDL_GPU_BLENDFACTOR_ZERO;
+		c.dstA = SDL_GPU_BLENDFACTOR_ONE;
 	}
 	// Complex shader effects: DoGrayScale, BoxBlur, AdjustGamma, UnivTransBlend, PsOverlay, etc.
 	// These use custom shaders with no blend (Copy-like)
@@ -1047,6 +1053,35 @@ void TVPRenderManager_GPU::OperateRect(iTVPRenderMethod* method,
 	// Draw
 	SDL_DrawGPUPrimitives(m_currentPass, 6, 1, 0, 0);
 	m_drawCount++;
+
+	// Debug capture: dump ALL source textures (static content) + target.
+	// Source textures are fully loaded before rendering; target shows
+	// accumulated state from previous operations (current draw not visible
+	// yet due to GPU pipeline buffering).
+	if (s_captureMode) {
+		// Dump source textures
+		for (size_t si = 0; si < textures.size(); si++) {
+			auto *srcTex = dynamic_cast<tTVPGPUTexture2D*>(textures[si].first);
+			if (srcTex && srcTex->GetGPUTexture() && srcTex->GetWidth() > 0 && srcTex->GetHeight() <= 4096) {
+				char lbl[64];
+				snprintf(lbl, sizeof(lbl), "src%d_%s_%p", (int)si,
+					gpuMethod->GetName().c_str(), (void*)textures[si].first);
+				DumpTextureToFile(lbl, srcTex->GetGPUTexture(),
+					srcTex->GetWidth(), srcTex->GetHeight());
+			}
+		}
+		// Dump target (accumulated state from previous operations this frame)
+		if (tar) {
+			auto *capTex = dynamic_cast<tTVPGPUTexture2D*>(tar);
+			if (capTex && capTex->GetGPUTexture() && capTex->GetWidth() <= 4096) {
+				char lbl[64];
+				snprintf(lbl, sizeof(lbl), "dst_%s_%p",
+					gpuMethod->GetName().c_str(), (void*)tar);
+				DumpTextureToFile(lbl, capTex->GetGPUTexture(),
+					capTex->GetWidth(), capTex->GetHeight());
+			}
+		}
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -1317,6 +1352,96 @@ void TVPRenderManager_GPU::ReadbackAndPresent(iTVPTexture2D *finalTex) {
 // ReadbackPixel — synchronous GPU pixel readback for diagnostics
 // Uses a separate command buffer to avoid interfering with main rendering.
 //------------------------------------------------------------------------------
+//------------------------------------------------------------------------------
+// Debug capture — dump full GPU texture to BMP file
+//------------------------------------------------------------------------------
+
+static int s_captureSeq = 0;
+void TVPRenderManager_GPU::DumpTextureToFile(const char *label, SDL_GPUTexture *tex, int w, int h) {
+	if (!m_device || !tex || w <= 0 || h <= 0) return;
+	if (w > 4096 || h > 4096) return; // sanity check
+
+	// Flush any pending render pass so the texture content is finalized
+	_EndFramePass();
+
+	SDL_GPUTransferBufferCreateInfo tci = {};
+	tci.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+	tci.size = (Uint32)(w * h * 4);
+	SDL_GPUTransferBuffer *tb = SDL_CreateGPUTransferBuffer(m_device, &tci);
+	if (!tb) return;
+
+	SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(m_device);
+	if (!cmd) { SDL_ReleaseGPUTransferBuffer(m_device, tb); return; }
+
+	SDL_GPUTextureRegion srcReg = {};
+	srcReg.texture = tex;
+	srcReg.w = (Uint32)w; srcReg.h = (Uint32)h; srcReg.d = 1;
+
+	SDL_GPUTextureTransferInfo dstTI = { tb, 0 };
+	SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cmd);
+	if (cp) {
+		SDL_DownloadFromGPUTexture(cp, &srcReg, &dstTI);
+		SDL_EndGPUCopyPass(cp);
+	}
+	SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
+	if (!fence) { SDL_ReleaseGPUTransferBuffer(m_device, tb); return; }
+	SDL_WaitForGPUFences(m_device, true, &fence, 1);
+	SDL_ReleaseGPUFence(m_device, fence);
+
+	void *map = SDL_MapGPUTransferBuffer(m_device, tb, true);
+	if (map) {
+		// BMP header
+		int pitch = w * 4;
+		int dataSize = pitch * h;
+		int bmpSize = 14 + 40 + dataSize;
+		std::vector<uint8_t> bmp(bmpSize);
+		bmp[0] = 'B'; bmp[1] = 'M';
+		*(uint32_t*)&bmp[2] = bmpSize;
+		*(uint32_t*)&bmp[10] = 14 + 40;
+		*(uint32_t*)&bmp[14] = 40;
+		*(int32_t*) &bmp[18] = w;
+		*(int32_t*) &bmp[22] = -h; // top-down
+		*(uint16_t*)&bmp[26] = 1;
+		*(uint16_t*)&bmp[28] = 32;
+		*(uint32_t*)&bmp[30] = 0;
+		*(uint32_t*)&bmp[34] = dataSize;
+
+		auto *src = (const uint8_t*)map;
+		auto *dst = &bmp[54];
+		for (int y = 0; y < h; y++) {
+			for (int x = 0; x < w; x++) {
+				uint32_t px = *(const uint32_t*)(src + y * pitch + x * 4);
+				dst[0] = (uint8_t)(px >> 16); // B
+				dst[1] = (uint8_t)(px >> 8);  // G
+				dst[2] = (uint8_t)(px);       // R
+				dst[3] = (uint8_t)(px >> 24); // A (preserve actual alpha)
+				dst += 4;
+			}
+		}
+		SDL_UnmapGPUTransferBuffer(m_device, tb);
+
+		s_captureSeq++;
+		char path[256];
+		snprintf(path, sizeof(path), "/sdcard/Download/cap_%s_%03d_%dx%d.bmp",
+			label, s_captureSeq, w, h);
+		FILE *f = fopen(path, "wb");
+		if (f) { fwrite(bmp.data(), 1, bmpSize, f); fclose(f); }
+		// Log corner + center pixel RGBA values for quick reference
+		auto samplePx = [&](int sx, int sy) -> uint32_t {
+			if (sx < 0) sx = 0; if (sx >= w) sx = w-1;
+			if (sy < 0) sy = 0; if (sy >= h) sy = h-1;
+			return *(const uint32_t*)(src + sy * pitch + sx * 4);
+		};
+		uint32_t tl = samplePx(0,0), tr = samplePx(w-1,0);
+		uint32_t bl = samplePx(0,h-1), br = samplePx(w-1,h-1);
+		uint32_t ct = samplePx(w/2,h/2);
+		__android_log_print(ANDROID_LOG_INFO, "##krkr",
+			"CAPTURE: %s (RGBA) TL=0x%08X TR=0x%08X BL=0x%08X BR=0x%08X CT=0x%08X",
+			path, tl, tr, bl, br, ct);
+	}
+	SDL_ReleaseGPUTransferBuffer(m_device, tb);
+}
+
 uint32_t TVPRenderManager_GPU::ReadbackPixel(SDL_GPUTexture *tex, int x, int y) {
 	if (!m_device || !tex) return 0;
 

@@ -46,6 +46,30 @@ JavaVM *jni::g_JVM = nullptr;
 std::string g_AndroidDisplayBackend = "vulkan"; // default
 
 //---------------------------------------------------------------------------
+// Log overlay — forwards TVPAddLog lines to Java LogOverlay via JNI
+//---------------------------------------------------------------------------
+static jclass    sLogOverlayCls   = nullptr;
+static jmethodID sLogOverlayMethod = nullptr;
+
+static void LogOverlayCallback(const ttstr &line) {
+	if (!jni::g_JVM || !sLogOverlayMethod) return;
+	JNIEnv *env = nullptr;
+	bool needsDetach = false;
+	int st = jni::g_JVM->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+	if (st == JNI_EDETACHED) {
+		if (jni::g_JVM->AttachCurrentThread(&env, nullptr) != JNI_OK) return;
+		needsDetach = true;
+	} else if (st != JNI_OK) {
+		return;
+	}
+	std::string utf8 = line.AsNarrowStdString();
+	jstring jline = env->NewStringUTF(utf8.c_str());
+	env->CallStaticVoidMethod(sLogOverlayCls, sLogOverlayMethod, jline);
+	env->DeleteLocalRef(jline);
+	if (needsDetach) jni::g_JVM->DetachCurrentThread();
+}
+
+//---------------------------------------------------------------------------
 // Helper: JNI string -> std::string, cache g_JVM from first JNI call
 //---------------------------------------------------------------------------
 static std::string jstr2str(JNIEnv *env, jstring jstr) {
@@ -322,6 +346,17 @@ void TVPUpdateCursorOverlay() {
 	env->DeleteLocalRef(cls);
 }
 
+// Debug capture toggle — called from Java overlay button
+void SetCaptureMode(bool on);
+bool IsCaptureMode();
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_tvp_kirikiri2_KR2Activity_nativeToggleCapture(JNIEnv*, jclass) {
+	SetCaptureMode(!IsCaptureMode());
+	__android_log_print(ANDROID_LOG_INFO, "##krkr", "Capture mode: %s",
+		IsCaptureMode() ? "ON" : "OFF");
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_org_tvp_kirikiri2_KR2Activity_nativeShowKeyboard(JNIEnv*, jclass) {
 	TVPShowIME(0, 0, 1920, 1080);
@@ -362,6 +397,25 @@ extern "C" int SDL_main(int argc, char *argv[]) {
 	TVPSetScreenSizeFromSDL(scrW, scrH);
 	__android_log_print(ANDROID_LOG_INFO, TAG,
 		"SDL_main: window %dx%d created", scrW, scrH);
+
+	// Cache JNI class/method for log overlay forwarding
+	if (jni::g_JVM) {
+		JNIEnv *env = nullptr;
+		jni::g_JVM->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+		if (!env) jni::g_JVM->AttachCurrentThread(&env, nullptr);
+		if (env) {
+			jclass cls = env->FindClass("org/tvp/kirikiri2/LogOverlay");
+			if (cls) {
+				sLogOverlayCls = (jclass)env->NewGlobalRef(cls);
+				sLogOverlayMethod = env->GetStaticMethodID(cls, "appendLog", "(Ljava/lang/String;)V");
+				env->DeleteLocalRef(cls);
+			}
+			if (sLogOverlayMethod) {
+				TVPSetOnLogOverlay(LogOverlayCallback);
+				__android_log_print(ANDROID_LOG_INFO, TAG, "Log overlay callback registered");
+			}
+		}
+	}
 
 	// Init display backend based on Java-side Intent preference.
 	// Only ONE backend is initialized to avoid Vulkan window claim conflicts.

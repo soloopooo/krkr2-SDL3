@@ -77,9 +77,15 @@ tTVPAtExit TVPDestroyLogObjectsAtExit
 //---------------------------------------------------------------------------
 void (*TVPOnLog)(const ttstr & line) = NULL;
 	// this function is invoked when a line is logged
+
+static void (*TVPOnLogOverlay)(const ttstr & line) = NULL;
+	// overlay callback — receives every logged line for real-time display
 //---------------------------------------------------------------------------
 
-
+void TVPSetOnLogOverlay(void (*func)(const ttstr & line))
+{
+	TVPOnLogOverlay = func;
+}
 
 //---------------------------------------------------------------------------
 // TVPSetOnLog
@@ -422,6 +428,7 @@ void TVPAddLog(const ttstr &line, bool appendtoimportant)
 	p++;
 	TJS_strcpy(p, line.c_str());
 	if(TVPOnLog) TVPOnLog(buf);
+	if(TVPOnLogOverlay) TVPOnLogOverlay(buf);
 #ifdef ENABLE_DEBUGGER
 	if( TJSEnableDebugMode ) TJSDebuggerLog(buf,appendtoimportant);
 	//OutputDebugStringW( buf.c_str() );

@@ -250,4 +250,6 @@ LauncherActivity (back to launcher)
 | `.opencode/memories/cursor-exit-multiprocess.md` | Virtual cursor fixes, exit flow, audio cleanup, multi-process FORTIFY fix |
 | `.opencode/memories/native-launcher-complete.md` | Native Android LauncherActivity implementation |
 | `.opencode/memories/audio-resampling-gpu-state.md` | SDL_AudioStream per-stream resampling, GPU renderer state |
-| `.opencode/memories/project-architecture-overview.md` | Full architecture overview (rendering, audio, plugins, build)
+| `.opencode/memories/project-architecture-overview.md` | Full architecture overview (rendering, audio, plugins, build) |
+| `.opencode/memories/gpu-crossfade-shader-fix.md` | GPU crossfade shader: root cause and fix for 2-texture blend |
+| `.opencode/memories/debug-xp3-tjs-workflow.md` | **Debugging workflow**: XP3 extraction to find TJS game scripts (critical for GPU mode debug)

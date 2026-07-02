@@ -35,6 +35,7 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Button;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
@@ -255,6 +256,11 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
 
 		// Floating game menu overlay (draggable button + popup menu)
 		GameMenuOverlay.attach(this);
+
+		// Real-time engine log overlay (toggle via GameMenuOverlay)
+		LogOverlay logOverlay = new LogOverlay(this);
+		logOverlay.setTag("log_overlay");
+		mLayout.addView(logOverlay);
 	}
 	
 	@Override
@@ -426,6 +432,7 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
 	static private native boolean nativeIsFullscreenStretch();
 	static private native void nativeToggleAspectRatio();
 	static private native void nativeOnMenuResult(int index);
+	static private native void nativeToggleCapture();
 	
 	static public void MessageController(int what, int arg1, int arg2) {
         Message msg = msgHandler.obtainMessage();
@@ -1000,6 +1007,8 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
         });
     }
 
+    private static Button mCaptureBtn = null;
+
     public static void updateDebugOverlay(final String text) {
         if (!mDebugOverlayVisible || mDebugOverlay == null) return;
         msgHandler.post(new Runnable() {
@@ -1007,6 +1016,28 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
             public void run() {
                 if (mDebugOverlay != null)
                     mDebugOverlay.setText(text);
+                // Lazy-init capture button
+                if (mCaptureBtn == null && sInstance != null) {
+                    mCaptureBtn = new Button(sInstance);
+                    mCaptureBtn.setText("CAP");
+                    mCaptureBtn.setTextSize(10);
+                    mCaptureBtn.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            nativeToggleCapture();
+                            String t = mCaptureBtn.getText().toString();
+                            mCaptureBtn.setText(t.contains("ON") ? "CAP" : "CAP:ON");
+                        }
+                    });
+                    float density = sInstance.getResources().getDisplayMetrics().density;
+                    FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT);
+                    lp.gravity = android.view.Gravity.TOP | android.view.Gravity.END;
+                    lp.setMargins(0, (int)(20 * density + 0.5f), (int)(20 * density + 0.5f), 0);
+                    mCaptureBtn.setLayoutParams(lp);
+                    sInstance.mLayout.addView(mCaptureBtn);
+                }
             }
         });
     }
@@ -1248,7 +1279,8 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
         static final int ITEM_WINDOW = 1;
         static final int ITEM_MOUSE_MODE = 2;
         static final int ITEM_KEYBOARD = 3;
-        static final int ITEM_EXIT = 4;
+        static final int ITEM_LOG = 4;
+        static final int ITEM_EXIT = 5;
         private View mButton;
         private float mOffsetX, mOffsetY;
         private boolean mMouseMode = true;
@@ -1325,6 +1357,7 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
             popup.getMenu().add(0, ITEM_MOUSE_MODE, 0,
                 mMouseMode ? "Switch to Touch" : "Switch to Mouse");
             popup.getMenu().add(0, ITEM_KEYBOARD, 0, "Keyboard");
+            popup.getMenu().add(0, ITEM_LOG, 0, "Log");
             popup.getMenu().add(0, ITEM_EXIT, 0, "Exit");
             popup.setOnMenuItemClickListener(item -> {
                 switch (item.getItemId()) {
@@ -1341,6 +1374,10 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
                     break;
                 case ITEM_KEYBOARD:
                     nativeShowKeyboard();
+                    break;
+                case ITEM_LOG:
+                    View v = activity.mLayout.findViewWithTag("log_overlay");
+                    if (v instanceof LogOverlay) ((LogOverlay) v).toggle();
                     break;
                 case ITEM_EXIT:
                     nativeGameMenuExit();

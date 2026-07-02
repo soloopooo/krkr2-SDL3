@@ -245,6 +245,7 @@ public:
 	// Reads pixel at (x,y) from tex. Returns 0 on failure.
 	// Only use for debugging — SLOW (stalls GPU).
 	uint32_t ReadbackPixel(SDL_GPUTexture *tex, int x, int y);
+	void DumpTextureToFile(const char *label, SDL_GPUTexture *tex, int w, int h);
 };
 
 // Registration

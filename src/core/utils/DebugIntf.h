@@ -20,6 +20,7 @@ extern bool TVPAutoLogToFileOnError;
 extern bool TVPAutoClearLogOnError;
 extern bool TVPLoggingToFile;
 extern void TVPSetOnLog(void (*func)(const ttstr & line));
+extern void TVPSetOnLogOverlay(void (*func)(const ttstr & line));
 TJS_EXP_FUNC_DEF(void, TVPAddLog, (const ttstr &line));
 TJS_EXP_FUNC_DEF(void, TVPAddImportantLog, (const ttstr &line));
 extern ttstr TVPGetLastLog(tjs_uint n);
