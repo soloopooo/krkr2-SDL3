@@ -18,8 +18,8 @@ bool g_VulkanDisplayActive = false;
 #include "tjsCommHead.h"
 
 // Debug capture mode
-extern bool IsCaptureMode();
-extern void SetCaptureMode(bool on);
+
+
 #include "Application.h"
 #include "TickCount.h"
 #include "EventIntf.h"
@@ -750,7 +750,7 @@ void TVPEngineTick() {
 			s_refreshCounter = 0;
 			s_fpsLimit = GlobalConfigManager::GetInstance()->GetValue<int>("fps_limit", 60);
 		}
-		if (IsCaptureMode()) s_fpsLimit = 1;
+		// (capture mode removed — use RenderDoc in-app API instead)
 		auto frameElapsed = std::chrono::duration_cast<std::chrono::microseconds>(
 			std::chrono::steady_clock::now() - tickStart).count();
 		int targetUs = s_fpsLimit > 0 ? (1000000 / s_fpsLimit) : 0;
@@ -769,8 +769,8 @@ void TVPEngineTick() {
 	if (elapsed >= 1000) {
 		int totalFps = g_stats.frameCount * 1000 / (elapsed ? elapsed : 1);
 		int avgTickUs = g_stats.frameCount ? (int)(g_stats.tickTotalUs / g_stats.frameCount) : 0;
-			__android_log_print(ANDROID_LOG_INFO, TAG, "ENGINE: %dfps%s %d/%d draws avg%04dus %dx%d",
-				totalFps, IsCaptureMode() ? " CAP" : "",
+			__android_log_print(ANDROID_LOG_INFO, TAG, "ENGINE: %dfps %d/%d draws avg%04dus %dx%d",
+				totalFps,
 				g_stats.framesWithDraws, g_stats.frameCount, avgTickUs, g_gameW, g_gameH);
 			g_stats = { std::chrono::steady_clock::now(), 0, 0, 0, 0 };
 		}
@@ -783,7 +783,7 @@ void TVPEngineTick() {
 //------------------------------------------------------------------------------
 // Coordinate conversion
 //------------------------------------------------------------------------------
-static void _screenToGame(float &sx, float &sy) {
+void _screenToGame(float &sx, float &sy) {
 	if (g_gameW <= 0 || g_gameH <= 0 || s_ScreenWidth <= 0 || s_ScreenHeight <= 0) return;
 	float origX = sx, origY = sy;
 	if (g_fullscreenStretch) {
@@ -932,6 +932,38 @@ void TVPForwardTouchMove(int id, float x, float y) {
 		g_cursorXf = g_cursorXf + dx;
 		g_cursorYf = g_cursorYf + dy;
 
+		// Clamp internal cursor position to screen bounds to prevent
+		// dead-reckoning drift from causing cursor "stuck" behaviour.
+		if (g_gameW > 0 && g_gameH > 0 && s_ScreenWidth > 0 && s_ScreenHeight > 0) {
+			float sx = g_cursorXf, sy = g_cursorYf;
+			TVPGameToScreen(sx, sy);
+			sx = std::max(0.0f, std::min(sx, (float)s_ScreenWidth));
+			sy = std::max(0.0f, std::min(sy, (float)s_ScreenHeight));
+			// Reverse of TVPGameToScreen to get back to game coords
+			if (g_fullscreenStretch) {
+				g_cursorXf = sx * g_gameW / s_ScreenWidth;
+				g_cursorYf = sy * g_gameH / s_ScreenHeight;
+			} else {
+				float a = (float)g_gameW / (float)g_gameH;
+				float sa = (float)s_ScreenWidth / (float)s_ScreenHeight;
+				int vpW, vpH, vpX, vpY;
+				if (sa > a) {
+					vpH = s_ScreenHeight; vpW = (int)(s_ScreenHeight * a);
+					vpX = (s_ScreenWidth - vpW) / 2; vpY = 0;
+				} else {
+					vpW = s_ScreenWidth; vpH = (int)(s_ScreenWidth / a);
+					vpX = 0; vpY = (s_ScreenHeight - vpH) / 2;
+				}
+				float gx = (sx - vpX) * g_gameW / vpW;
+				float gy = (sy - vpY) * g_gameH / vpH;
+				g_cursorXf = gx; g_cursorYf = gy;
+			}
+		}
+
+		// Immediately update cursor overlay so movement is smooth
+		// regardless of engine frame rate.
+		TVPUpdateCursorOverlay();
+
 		// Send mouse move to engine for hover effects (with buffer offset)
 		win->m_LastMouseX = _cursorX(); win->m_LastMouseY = _cursorY();
 		if (win->GetWindow())
@@ -941,6 +973,54 @@ void TVPForwardTouchMove(int id, float x, float y) {
 }
 
 void TVPForwardTouchCancel(int id, float x, float y) { TVPForwardTouchEnd(id, x, y); }
+
+// Physical mouse (USB/Bluetooth) direct forwarding.
+// Unlike trackpad emulation, these use absolute screen coordinates
+// converted to game coords, and bypass g_mouseMode.
+void TVPForwardMouseMove(int id, float x, float y) {
+	TVPWindowLayerSDL *win = TVPWindowLayerSDL::GetActiveWindow();
+	if (!win) return;
+	float gx = x, gy = y;
+	_screenToGame(gx, gy);
+	g_cursorXf = gx; g_cursorYf = gy;
+	win->m_LastMouseX = (int)gx; win->m_LastMouseY = (int)gy;
+	if (win->GetWindow())
+		TVPPostInputEvent(new tTVPOnMouseMoveInputEvent(
+			win->GetWindow(), (int)gx, (int)gy,
+			TVPGetCurrentShiftKeyState()), TVP_EPT_DISCARDABLE);
+	TVPUpdateCursorOverlay();
+}
+
+void TVPForwardMouseDown(int id, float x, float y) {
+	TVPWindowLayerSDL *win = TVPWindowLayerSDL::GetActiveWindow();
+	if (!win) return;
+	float gx = x, gy = y;
+	_screenToGame(gx, gy);
+	g_cursorXf = gx; g_cursorYf = gy;
+	win->m_LastMouseX = (int)gx; win->m_LastMouseY = (int)gy;
+	s_Scancode[VK_LBUTTON] = 0x11;
+	if (win->GetWindow())
+		TVPPostInputEvent(new tTVPOnMouseDownInputEvent(
+			win->GetWindow(), (int)gx, (int)gy,
+			mbLeft, TVPGetCurrentShiftKeyState()));
+	TVPUpdateCursorOverlay();
+}
+
+void TVPForwardMouseUp(int id, float x, float y) {
+	TVPWindowLayerSDL *win = TVPWindowLayerSDL::GetActiveWindow();
+	if (!win) return;
+	float gx = x, gy = y;
+	_screenToGame(gx, gy);
+	s_Scancode[VK_LBUTTON] &= 0x10;
+	if (win->GetWindow()) {
+		TVPPostInputEvent(new tTVPOnMouseUpInputEvent(
+			win->GetWindow(), (int)gx, (int)gy,
+			mbLeft, TVPGetCurrentShiftKeyState()));
+		TVPPostInputEvent(new tTVPOnClickInputEvent(
+			win->GetWindow(), (int)gx, (int)gy));
+	}
+	TVPUpdateCursorOverlay();
+}
 
 void TVPForwardTextInput(const std::string &text) {
 	TVPWindowLayerSDL *win = TVPWindowLayerSDL::GetActiveWindow();

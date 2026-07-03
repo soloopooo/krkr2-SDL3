@@ -94,6 +94,9 @@ private:
 	friend void TVPForwardTouchEnd(int, float, float);
 	friend void TVPForwardTouchMove(int, float, float);
 	friend void TVPForwardTouchCancel(int, float, float);
+	friend void TVPForwardMouseMove(int, float, float);
+	friend void TVPForwardMouseDown(int, float, float);
+	friend void TVPForwardMouseUp(int, float, float);
 	friend void TVPForwardTextInput(const std::string &);
 	friend void TVPForwardKeyEvent(int, bool);
 };
@@ -105,10 +108,16 @@ void TVPForwardTouchEnd(int id, float x, float y);
 void TVPForwardTouchMove(int id, float x, float y);
 void TVPForwardTouchCancel(int id, float x, float y);
 void TVPForwardTextInput(const std::string &text);
+// Physical mouse forwarding (USB/Bluetooth)
+void TVPForwardMouseMove(int id, float x, float y);
+void TVPForwardMouseDown(int id, float x, float y);
+void TVPForwardMouseUp(int id, float x, float y);
 void TVPSetScreenSizeFromSDL(int w, int h);
 
-// Convert game coordinates to screen coordinates (inverse of _screenToGame)
+// Convert game coordinates to screen coordinates
 void TVPGameToScreen(float &gx, float &gy);
+// Convert screen coordinates to game coordinates (inverse of TVPGameToScreen)
+void _screenToGame(float &sx, float &sy);
 void TVPEngineTick();
 
 // Software display init (SDL_Renderer, called from SDL_main)

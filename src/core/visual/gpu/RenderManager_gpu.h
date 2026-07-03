@@ -5,6 +5,7 @@
 #include <map>
 #include <unordered_map>
 #include "RenderManager.h"
+#include "renderdoc_app.h"
 
 class tTJSNI_Window;
 
@@ -128,9 +129,6 @@ class TVPRenderManager_GPU : public iTVPRenderManager {
 	SDL_GPUTexture *m_swapchainTex = nullptr;
 	SDL_GPURenderPass *m_currentPass = nullptr;
 	iTVPTexture2D *m_currentTarget = nullptr;
-	iTVPTexture2D *m_displayTarget = nullptr; // DrawBuffer texture for present
-	SDL_GPUTexture *m_fallbackTex = nullptr;  // CPU upload fallback texture
-	int m_fallbackW = 0, m_fallbackH = 0;
 	Uint32 m_swW = 0, m_swH = 0;
 
 	// Readback state (double-buffered with fence)
@@ -164,6 +162,12 @@ class TVPRenderManager_GPU : public iTVPRenderManager {
 	SDL_GPUShader *m_fs_fill = nullptr;      // solid-color fill frag shader
 	SDL_GPUShader *m_fs_present = nullptr;   // present (force alpha=1) frag shader
 	SDL_GPUShader *m_fs_crossfade = nullptr; // crossfade (2-tex blend) frag shader
+
+	// RenderDoc in-app capture
+	void *m_rdoc_lib = nullptr;
+	RENDERDOC_API_1_6_0 *m_rdoc = nullptr;
+	bool m_captureThisFrame = false;
+	void InitRenderDoc();
 
 	SDL_GPUGraphicsPipeline* _CreateQuadPipeline(
 		SDL_GPUTextureFormat format,
@@ -230,10 +234,8 @@ public:
 	// Frame lifecycle — called from TVPEngineTick
 	void BeginFrame();
 	void EndFrame();
-	void SetFallbackDisplay(const void *pixels, int w, int h);
 	// End current render pass (for texture updates between draws)
 	void FlushPass();
-	void ReadbackAndPresent(iTVPTexture2D *finalTex);
 	const uint8_t* GetFramePixels(int &w, int &h) const {
 		if (!m_hasFrameResult) return nullptr;
 		w = m_frameW; h = m_frameH;
@@ -245,7 +247,10 @@ public:
 	// Reads pixel at (x,y) from tex. Returns 0 on failure.
 	// Only use for debugging — SLOW (stalls GPU).
 	uint32_t ReadbackPixel(SDL_GPUTexture *tex, int x, int y);
-	void DumpTextureToFile(const char *label, SDL_GPUTexture *tex, int w, int h);
+
+	// RenderDoc capture trigger — sets m_captureThisFrame so the next
+	// BeginFrame/EndFrame pair wraps a capture with StartFrameCapture/EndFrameCapture.
+	void TriggerRenderDocCapture();
 };
 
 // Registration

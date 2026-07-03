@@ -347,14 +347,13 @@ void TVPUpdateCursorOverlay() {
 }
 
 // Debug capture toggle — called from Java overlay button
-void SetCaptureMode(bool on);
-bool IsCaptureMode();
+// Triggers a single RenderDoc capture on the next frame.
+extern void TriggerRenderDocCapture();
 
 extern "C" JNIEXPORT void JNICALL
 Java_org_tvp_kirikiri2_KR2Activity_nativeToggleCapture(JNIEnv*, jclass) {
-	SetCaptureMode(!IsCaptureMode());
-	__android_log_print(ANDROID_LOG_INFO, "##krkr", "Capture mode: %s",
-		IsCaptureMode() ? "ON" : "OFF");
+	TriggerRenderDocCapture();
+	__android_log_print(ANDROID_LOG_INFO, "##krkr", "RenderDoc capture toggled");
 }
 
 extern "C" JNIEXPORT void JNICALL

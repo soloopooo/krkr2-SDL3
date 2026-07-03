@@ -254,13 +254,14 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
 		String displayBackend = readGlobalPref("renderer", "vulkan");
 		nativeSetDisplayBackend(displayBackend);
 
-		// Floating game menu overlay (draggable button + popup menu)
-		GameMenuOverlay.attach(this);
-
 		// Real-time engine log overlay (toggle via GameMenuOverlay)
 		LogOverlay logOverlay = new LogOverlay(this);
 		logOverlay.setTag("log_overlay");
 		mLayout.addView(logOverlay);
+
+		// Floating game menu overlay (draggable button + popup menu)
+		// Added AFTER log overlay so it draws on top.
+		GameMenuOverlay.attach(this);
 	}
 	
 	@Override
@@ -1033,10 +1034,15 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
                     FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.WRAP_CONTENT,
                         FrameLayout.LayoutParams.WRAP_CONTENT);
-                    lp.gravity = android.view.Gravity.TOP | android.view.Gravity.END;
-                    lp.setMargins(0, (int)(20 * density + 0.5f), (int)(20 * density + 0.5f), 0);
                     mCaptureBtn.setLayoutParams(lp);
                     sInstance.mLayout.addView(mCaptureBtn);
+                    // Position at bottom-left after layout
+                    int leftMar = (int)(16 * density + 0.5f);
+                    int bottomMar = (int)(60 * density + 0.5f);
+                    mCaptureBtn.post(() -> {
+                        mCaptureBtn.setX(leftMar);
+                        mCaptureBtn.setY(sInstance.mLayout.getHeight() - mCaptureBtn.getHeight() - bottomMar);
+                    });
                 }
             }
         });
@@ -1077,7 +1083,7 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
         msgHandler.post(new Runnable() {
             @Override
             public void run() {
-                if (v.getParent() == null) return;
+                if (v.getParent() == null || sInstance == null) return;
                 int iw = v.getWidth(), ih = v.getHeight();
                 if (iw <= 0 || ih <= 0) {
                     android.view.ViewGroup.LayoutParams lp = v.getLayoutParams();
@@ -1085,8 +1091,20 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
                 }
                 float tipOffX = CURSOR_TIP_X / 24f * iw;
                 float tipOffY = CURSOR_TIP_Y / 24f * ih;
-                v.setTranslationX(x - tipOffX);
-                v.setTranslationY(y - tipOffY);
+                // Clamp hotspot to screen pixel bounds.
+                // The ImageView may go slightly off-screen to allow the hotspot
+                // to reach the exact edges (including bottom and right).
+                int parentW = sInstance.mLayout.getWidth();
+                int parentH = sInstance.mLayout.getHeight();
+                if (parentW <= 0 || parentH <= 0) {
+                    v.setTranslationX(x - tipOffX);
+                    v.setTranslationY(y - tipOffY);
+                    return;
+                }
+                float clampX = Math.max(0, Math.min(x, parentW));
+                float clampY = Math.max(0, Math.min(y, parentH));
+                v.setTranslationX(clampX - tipOffX);
+                v.setTranslationY(clampY - tipOffY);
             }
         });
     }
@@ -1271,6 +1289,21 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
             .getBoolean("mouse_mode", true);
     }
 
+    private static void saveFloatingButtonPos(float x, float y) {
+        if (sInstance == null) return;
+        sInstance.getSharedPreferences("engine", MODE_PRIVATE)
+            .edit().putFloat("float_btn_x", x).putFloat("float_btn_y", y).apply();
+    }
+
+    private static float[] loadFloatingButtonPos(float defaultX, float defaultY) {
+        if (sInstance == null) return new float[]{defaultX, defaultY};
+        float x = sInstance.getSharedPreferences("engine", MODE_PRIVATE)
+            .getFloat("float_btn_x", defaultX);
+        float y = sInstance.getSharedPreferences("engine", MODE_PRIVATE)
+            .getFloat("float_btn_y", defaultY);
+        return new float[]{x, y};
+    }
+
     //--------------------------------------------------------------------------
     // GameMenuOverlay — draggable floating button + popup menu
     //--------------------------------------------------------------------------
@@ -1320,8 +1353,10 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
             mButton.setVisibility(View.GONE);
             FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(btnSize, btnSize);
             lp.gravity = android.view.Gravity.BOTTOM | android.view.Gravity.START;
-            lp.bottomMargin = (int)(100 * density + 0.5f);
-            lp.leftMargin = (int)(16 * density + 0.5f);
+            // Restore saved margins, or default
+            float[] savedMargins = loadFloatingButtonPos(16 * density, 100 * density);
+            lp.leftMargin = (int)(savedMargins[0] + 0.5f);
+            lp.bottomMargin = (int)(savedMargins[1] + 0.5f);
             mButton.setLayoutParams(lp);
 
             mButton.setOnTouchListener((v, event) -> {
@@ -1335,6 +1370,12 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
                     v.setY(event.getRawY() - mOffsetY);
                     return true;
                 case android.view.MotionEvent.ACTION_UP: {
+                    // Save position (distance from bottom)
+                    int parentW = activity.mLayout.getWidth();
+                    int parentH = activity.mLayout.getHeight();
+                    float leftM = Math.max(0, v.getX());
+                    float bottomM = Math.max(0, parentH - btnSize - v.getY());
+                    saveFloatingButtonPos(leftM, bottomM);
                     float dx = event.getRawX() - (v.getX() + mOffsetX);
                     float dy = event.getRawY() - (v.getY() + mOffsetY);
                     if (Math.sqrt(dx*dx + dy*dy) < 20)
@@ -1349,18 +1390,20 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
         }
 
 		void showMenu(KR2Activity activity, View anchor) {
-			// Popup inherits activity theme (DayNight), follows system dark/light mode
-            PopupMenu popup = new PopupMenu(activity, anchor);
-            popup.getMenu().add(0, ITEM_GAME_MENU, 0, "Game Menu");
-            popup.getMenu().add(0, ITEM_WINDOW, 0,
-                nativeIsFullscreenStretch() ? "Window (Stretch)" : "Window (Aspect)");
-            popup.getMenu().add(0, ITEM_MOUSE_MODE, 0,
-                mMouseMode ? "Switch to Touch" : "Switch to Mouse");
-            popup.getMenu().add(0, ITEM_KEYBOARD, 0, "Keyboard");
-            popup.getMenu().add(0, ITEM_LOG, 0, "Log");
-            popup.getMenu().add(0, ITEM_EXIT, 0, "Exit");
-            popup.setOnMenuItemClickListener(item -> {
-                switch (item.getItemId()) {
+            // Use AlertDialog instead of PopupMenu to prevent onPause() being called,
+            // which would pause the native thread and stop audio playback.
+            AlertDialog.Builder builder = new AlertDialog.Builder(activity);
+            builder.setTitle("Menu");
+            String[] items = {
+                "Game Menu",
+                nativeIsFullscreenStretch() ? "Window (Stretch)" : "Window (Aspect)",
+                mMouseMode ? "Switch to Touch" : "Switch to Mouse",
+                "Keyboard",
+                "Log",
+                "Exit"
+            };
+            builder.setItems(items, (dialog, which) -> {
+                switch (which) {
                 case ITEM_GAME_MENU:
                     nativeShowGameMenu();
                     break;
@@ -1383,9 +1426,9 @@ public class KR2Activity extends SDLActivity implements ActivityCompat.OnRequest
                     nativeGameMenuExit();
                     break;
                 }
-                return true;
             });
-            popup.show();
+            builder.setCancelable(true);
+            builder.show();
         }
 
         void show() { if (mButton != null) mButton.setVisibility(View.VISIBLE); }

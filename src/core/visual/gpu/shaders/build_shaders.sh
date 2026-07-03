@@ -11,7 +11,7 @@ glslc -c -fshader-stage=fragment present.frag -o present_frag.spv
 glslc -c -fshader-stage=fragment crossfade.frag -o crossfade_frag.spv
 python3 -c "
 import struct, os
-files = ['quad_vert','quad_frag','gray_frag','blur_frag','gamma_frag','adjust_gamma_frag','univ_trans_frag']
+files = ['quad_vert','quad_frag','gray_frag','blur_frag','gamma_frag','adjust_gamma_frag','univ_trans_frag','present_frag','crossfade_frag','fill_frag']
 for f in files:
     with open(f+'.spv','rb') as fh: data=fh.read()
     print(f'{f}: {len(data)} bytes')

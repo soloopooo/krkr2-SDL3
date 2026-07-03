@@ -7,15 +7,15 @@
 #include "Application.h"
 #include "DebugIntf.h"
 #include "WindowLayer_sdl.h"
+#include "TVPSDL.h"
 #include "vkdefine.h"
 
 static bool sSDLInited = false;
 static int sScreenWidth = 1280;
 static int sScreenHeight = 720;
 
-// When a finger is down on Android, SDL3 synthesizes duplicate MOUSE events.
-// We skip those to avoid corrupting cursor tracking coordinates.
-static bool sFingerDown = false;
+
+
 
 void TVPInitSDL() {
 	if (sSDLInited) return;
@@ -77,19 +77,16 @@ void TVPProcessSDLEvents() {
 			break;
 		// Touch events (primary on Android)
 		case SDL_EVENT_FINGER_DOWN:
-			sFingerDown = true;
 			TVPForwardTouchBegin(0,
 				e.tfinger.x * sScreenWidth,
 				e.tfinger.y * sScreenHeight);
 			break;
 		case SDL_EVENT_FINGER_UP:
-			sFingerDown = false;
 			TVPForwardTouchEnd(0,
 				e.tfinger.x * sScreenWidth,
 				e.tfinger.y * sScreenHeight);
 			break;
 		case SDL_EVENT_FINGER_CANCELED:
-			sFingerDown = false;
 			TVPForwardTouchCancel(0,
 				e.tfinger.x * sScreenWidth,
 				e.tfinger.y * sScreenHeight);
@@ -99,15 +96,31 @@ void TVPProcessSDLEvents() {
 				e.tfinger.x * sScreenWidth,
 				e.tfinger.y * sScreenHeight);
 			break;
-		// Mouse events (USB/Bluetooth mouse) — skip while finger is touching
+		// Mouse events (USB/Bluetooth physical mouse).
+		// SDL3 synthesises MOUSE events from touch with which=SDL_TOUCH_MOUSEID;
+		// real physical mice get a different which value.  Route accordingly:
+		//   real mouse → TVPForwardMouse*  (absolute pointing, skip trackpad)
+		//   synthetic  → TVPForwardTouch*  (trackpad/touch behaviour per g_mouseMode)
 		case SDL_EVENT_MOUSE_MOTION:
-			if (!sFingerDown) TVPForwardTouchMove(0, e.motion.x, e.motion.y);
+			if (e.motion.which == SDL_TOUCH_MOUSEID) {
+				TVPForwardTouchMove(0, e.motion.x, e.motion.y);
+			} else {
+				TVPForwardMouseMove(0, e.motion.x, e.motion.y);
+			}
 			break;
 		case SDL_EVENT_MOUSE_BUTTON_DOWN:
-			if (!sFingerDown) TVPForwardTouchBegin(0, e.button.x, e.button.y);
+			if (e.button.which == SDL_TOUCH_MOUSEID) {
+				TVPForwardTouchBegin(0, e.button.x, e.button.y);
+			} else {
+				TVPForwardMouseDown(0, e.button.x, e.button.y);
+			}
 			break;
 		case SDL_EVENT_MOUSE_BUTTON_UP:
-			if (!sFingerDown) TVPForwardTouchEnd(0, e.button.x, e.button.y);
+			if (e.button.which == SDL_TOUCH_MOUSEID) {
+				TVPForwardTouchEnd(0, e.button.x, e.button.y);
+			} else {
+				TVPForwardMouseUp(0, e.button.x, e.button.y);
+			}
 			break;
 		case SDL_EVENT_KEY_DOWN:
 			TVPForwardKeyEvent(_mapSDLK2VK(e.key.key), true);
