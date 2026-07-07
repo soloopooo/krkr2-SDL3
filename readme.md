@@ -1,3 +1,67 @@
+# !!!WARNING!!!  
+
+此工程与 https://github.com/krkrsdl3/krkrsdl3 无关联。
+
+
+
+此工程本身仅作为一个实验，验证目前只使用开源大模型（Deepseek, GLM）能否完全做到 GPU Vulkan 与原版 CPU 渲染效果一致。
+
+详情代码请见 SDL3-debug-GPU 分支。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # Krikiroid2-Yuri  
 
 ![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/YuriSizuku/Kirikiroid2Yuri?color=green&label=krkr2yuri&style=flat-square7&logo=4chan)  ![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/YuriSizuku/Kirikiroid2Yuri/build_android.yml?label=android%28aarch64%29&style=flat-square)
