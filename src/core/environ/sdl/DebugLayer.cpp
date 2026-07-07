@@ -296,8 +296,9 @@ void TVPDebugLayer::ReplayDrawCalls() {
 			SDL_PushGPUFragmentUniformData(cmd, 1, dc.colorUBO, 16);
 		}
 
-		// Bind source textures
+		// Bind source textures — skip call if any required texture is unavailable
 		SDL_GPUTextureSamplerBinding tsBind[8] = {};
+		int nValid = 0;
 		int nBind = (int)dc.sources.size();
 		if (nBind > 8) nBind = 8;
 		auto* sampler = gpu->GetSampler();
@@ -306,7 +307,13 @@ void TVPDebugLayer::ReplayDrawCalls() {
 			if (src && src->GetGPUTexture()) {
 				tsBind[si].texture = src->GetGPUTexture();
 				tsBind[si].sampler = sampler;
+				nValid++;
 			}
+		}
+		// If method expects textures but none are valid, skip this draw call
+		if (nBind > 0 && nValid != nBind) {
+			// Missing textures — skip (textures may have been released since recording)
+			continue;
 		}
 		if (nBind > 0)
 			SDL_BindGPUFragmentSamplers(rp, 0, tsBind, nBind);

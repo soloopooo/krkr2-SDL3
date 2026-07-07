@@ -1910,7 +1910,19 @@ void TVPRenderManager_GPU::EndFrame() {
 			// Determine which texture to present
 			SDL_GPUTexture *presentTex = nullptr;
 			float gameW = 0, gameH = 0;
-			if (readbackTex) {
+			// NAV mode: show replay target instead of game render target
+			{
+				auto* dbg = TVPDebugLayer::Instance();
+				if (dbg->GetMode() == TVPDebugLayer::DRAW_CALL_NAV) {
+					SDL_GPUTexture* replayTex = dbg->GetReplayTarget();
+					if (replayTex && replayTex != m_swapchainTex) {
+						presentTex = replayTex;
+						gameW = (float)dbg->GetReplayW();
+						gameH = (float)dbg->GetReplayH();
+					}
+				}
+			}
+			if (!presentTex && readbackTex) {
 				tTVPGPUTexture2D *gpuTex = dynamic_cast<tTVPGPUTexture2D*>(readbackTex);
 				if (gpuTex && gpuTex->GetGPUTexture() &&
 					m_swapchainTex != gpuTex->GetGPUTexture()) {
