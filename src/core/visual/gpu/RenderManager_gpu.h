@@ -32,7 +32,7 @@ class tTVPGPUTexture2D : public iTVPTexture2D {
 	// CPU-side pixel buffer for GetScanLineForRead/Write (software compat)
 	std::vector<uint8_t> m_pixels;
 	int m_width, m_height, m_pitch;
-	bool m_needsInit = true; // clear on first render-pass use
+	bool m_pixelsDirty = false; // Bug #8: GPU wrote to this texture, m_pixels is stale
 public:
 	tTVPGPUTexture2D(SDL_GPUDevice *dev, SDL_GPUTexture *tex,
 		int texW, int texH, int w, int h,
@@ -51,8 +51,8 @@ public:
 	bool IsOpaque() override { return m_opaque; }
 	cocos2d::Texture2D* GetAdapterTexture(cocos2d::Texture2D* origTex) override { return nullptr; }
 	bool GetScale(float &x, float &y) override { x = 1.f; y = 1.f; return true; }
-	bool NeedsInit() const { return m_needsInit; }
-	void SetInitialized() { m_needsInit = false; }
+	void SetPixelsDirty() { m_pixelsDirty = true; }  // Bug #8: mark after GPU render target writes
+	void ReadbackToPixels();  // Bug #8: sync m_pixels from GPU texture (RGBA→BGRA swap)
 };
 
 //------------------------------------------------------------------------------
@@ -69,6 +69,7 @@ class tTVPGPURenderMethod : public iTVPRenderMethod {
 	SDL_GPUBlendOp m_colorOp, m_alphaOp;
 	bool m_blendEnabled;
 	int m_numTextures;
+	bool m_needsDestRead = false; // requires 2-pass: copy target→temp before rendering
 
 	// UBO data for shaders with uniforms
 	uint8_t m_uboData[256];
@@ -120,6 +121,7 @@ class TVPRenderManager_GPU : public iTVPRenderManager {
 	// Shared shaders (from SPIR-V)
 	SDL_GPUShader *m_vs = nullptr; // textured quad vertex
 	SDL_GPUShader *m_fs = nullptr; // textured quad fragment
+	SDL_GPUShader *m_fs_pma = nullptr; // quad fragment — premultiplied alpha (rgb*=opacity)
 
 	// Quad vertex buffer (fullscreen quad)
 	SDL_GPUBuffer *m_quadVerts = nullptr;
@@ -137,8 +139,13 @@ class TVPRenderManager_GPU : public iTVPRenderManager {
 		SDL_GPUTransferBuffer *tb = nullptr;
 		SDL_GPUFence *fence = nullptr;
 		int texW = 0, texH = 0;
+		Uint32 tbSize = 0;  // current capacity of tb
 	};
 	ReadbackSlot m_rbSlot[READBACK_SLOTS];
+
+	// Cached temp texture for dest-read (Ps blends, _d variants)
+	SDL_GPUTexture *m_tempDestCopy = nullptr;
+	int m_tempDestCopyW = 0, m_tempDestCopyH = 0;
 	int m_rbActive = 0; // current slot being filled
 	bool m_hasFrameResult = false;
 	int m_frameW = 0, m_frameH = 0;
@@ -162,6 +169,23 @@ class TVPRenderManager_GPU : public iTVPRenderManager {
 	SDL_GPUShader *m_fs_fill = nullptr;      // solid-color fill frag shader
 	SDL_GPUShader *m_fs_present = nullptr;   // present (force alpha=1) frag shader
 	SDL_GPUShader *m_fs_crossfade = nullptr; // crossfade (2-tex blend) frag shader
+	SDL_GPUShader *m_fs_applyColorMap = nullptr;   // ApplyColorMap frag shader (binding 1 UBO)
+	SDL_GPUShader *m_fs_applyColorMap_a = nullptr; // ApplyColorMap_a premultiplied variant
+	SDL_GPUShader *m_fs_psOverlay = nullptr;       // PsOverlayBlend (2-tex dest-read)
+	SDL_GPUShader *m_fs_alphaBlendD = nullptr;     // AlphaBlend_d (2-tex dest-read, opacity-on-opacity)
+	// Photoshop blend shaders (dest-read, 2-texture)
+	SDL_GPUShader *m_fs_psHardLight = nullptr;
+	SDL_GPUShader *m_fs_psSoftLight = nullptr;
+	SDL_GPUShader *m_fs_psColorDodge = nullptr;
+	SDL_GPUShader *m_fs_psColorBurn = nullptr;
+	SDL_GPUShader *m_fs_psDiff = nullptr;
+	SDL_GPUShader *m_fs_psExclusion = nullptr;
+	SDL_GPUShader *m_fs_psLighten = nullptr;
+	SDL_GPUShader *m_fs_psDarken = nullptr;
+	// _d variant shaders (dest-read, opacity-on-opacity)
+	SDL_GPUShader *m_fs_applyColorMap_d = nullptr;
+	SDL_GPUShader *m_fs_constAlphaBlend_d = nullptr;
+	SDL_GPUShader *m_fs_constColorAlphaBlend_d = nullptr;
 
 	// RenderDoc in-app capture
 	void *m_rdoc_lib = nullptr;
@@ -236,6 +260,10 @@ public:
 	void EndFrame();
 	// End current render pass (for texture updates between draws)
 	void FlushPass();
+	// Copy current render target to a cached temp texture for dest-read operations.
+	// Closes the active render pass, does the copy, and begins a new pass on the same target.
+	// Returns the temp SDL_GPUTexture* (owned by the manager, valid until next PrepareDestReadCopy).
+	SDL_GPUTexture* PrepareDestReadCopy();
 	const uint8_t* GetFramePixels(int &w, int &h) const {
 		if (!m_hasFrameResult) return nullptr;
 		w = m_frameW; h = m_frameH;

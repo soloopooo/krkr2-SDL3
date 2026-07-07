@@ -279,8 +279,8 @@ bool tTVPBaseBitmap::Fill(tTVPRect rect, tjs_uint32 value)
         }
         TVPEndThreadTask();
 #endif
-	static iTVPRenderMethod* method = GetRenderManager()->GetRenderMethod("FillARGB");
-	static int paramid = method->EnumParameterID("color");
+	iTVPRenderMethod* method = GetRenderManager()->GetRenderMethod("FillARGB");
+	int paramid = method->EnumParameterID("color");
 	method->SetParameterColor4B(paramid, value);
 	iTVPTexture2D *reftex = GetTexture();
 	GetRenderManager()->OperateRect(method, GetTextureForRender(method->IsBlendTarget(), &rect),
@@ -297,8 +297,8 @@ bool iTVPBaseBitmap::Fill(tTVPRect rect, tjs_uint32 value)
 	BOUND_CHECK(false);
 	if (Is32BPP()) value = TVP_REVRGB(value);
 
-	static iTVPRenderMethod* method = TVPGetRenderManager()->GetRenderMethod("FillARGB");
-	static int paramid = method->EnumParameterID("color");
+	iTVPRenderMethod* method = TVPGetRenderManager()->GetRenderMethod("FillARGB");
+	int paramid = method->EnumParameterID("color");
 	method->SetParameterColor4B(paramid, value);
 	iTVPTexture2D *reftex = GetTexture();
 	TVPGetRenderManager()->OperateRect(method, GetTextureForRender(method->IsBlendTarget(), &rect),
@@ -899,19 +899,19 @@ bool tTVPBaseBitmap::CopyRect(tjs_int x, tjs_int y, const iTVPBaseBitmap *ref,
 	{
 	case TVP_BB_COPY_MAIN:
 	{
-		static iTVPRenderMethod *_method = GetRenderManager()->GetRenderMethod("CopyColor");
+		iTVPRenderMethod *_method = GetRenderManager()->GetRenderMethod("CopyColor");
 		method = _method;
 	}
 		break;
 	case TVP_BB_COPY_MASK:
 	{
-		static iTVPRenderMethod *_method = GetRenderManager()->GetRenderMethod("CopyMask");
+		iTVPRenderMethod *_method = GetRenderManager()->GetRenderMethod("CopyMask");
 		method = _method;
 	}
 		break;
 	case TVP_BB_COPY_MAIN | TVP_BB_COPY_MASK:
 	{
-		static iTVPRenderMethod *_method = GetRenderManager()->GetRenderMethod("Copy");
+		iTVPRenderMethod *_method = GetRenderManager()->GetRenderMethod("Copy");
 		method = _method;
 	}
 		break;
@@ -1405,6 +1405,19 @@ bool iTVPBaseBitmap::Blt(tjs_int x, tjs_int y, const iTVPBaseBitmap *ref,
 
 	if(opa == 0) return false; // opacity==0 has no action
 
+	// Log all Blt operations (method + opacity) for cross-referencing GPU OPR logs
+	{
+		const char *mn = "?";
+		switch (method) {
+			case bmCopy: mn = "Copy"; break; case bmCopyOnAlpha: mn = "CopyOnAlpha"; break;
+			case bmCopyOnAddAlpha: mn = "CopyOnAddAlpha"; break; case bmAlpha: mn = "Alpha"; break;
+			case bmAlphaOnAlpha: mn = "AlphaOnAlpha"; break; case bmAlphaOnAddAlpha: mn = "AlphaOnAddAlpha"; break;
+			case bmAdd: mn = "Add"; break; case bmSub: mn = "Sub"; break; case bmMul: mn = "Mul"; break;
+			case bmAddAlpha: mn = "AddAlpha"; break;
+		}
+		__android_log_print(ANDROID_LOG_INFO, "##BLT", "Blt: method=%-14s opa=%3d hda=%d sw=%d gpu=%d", mn, opa, (int)hda, (int)GetRenderManager()->IsSoftware(), (int)!GetRenderManager()->IsSoftware());
+	}
+
 	// bound check
 	tjs_int bmpw, bmph;
 
@@ -1482,7 +1495,20 @@ bool iTVPBaseBitmap::Blt(tjs_int x, tjs_int y, const iTVPBaseBitmap *ref,
 	tRenderTexRectArray::Element src_tex[] = {
 		tRenderTexRectArray::Element(ref->GetTexture(), refrect)
 	};
-	iTVPRenderMethod *rmethod = mgr->GetRenderMethod(opa, hda, method);
+	iTVPRenderMethod *rmethod = nullptr;
+	// When drawing children to the parent's temp buffer (UpdateBitmapForChild),
+	// use AlphaBlend_Copy blend (ONE/ZERO + shader opacity) to avoid both
+	// alpha squaring (from SRC_ALPHA) and color leaking (from CONSTANT_COLOR).
+	extern bool g_childDrawToTemp;
+	if (g_childDrawToTemp && !mgr->IsSoftware()) {
+		rmethod = mgr->GetRenderMethod("AlphaBlend_Copy");
+		if (rmethod) {
+			int opa_id = rmethod->EnumParameterID("opacity");
+			if (opa_id >= 0) rmethod->SetParameterOpa(opa_id, opa);
+			__android_log_print(ANDROID_LOG_INFO, "##BLT", "Blt: [CA] method=AlphaBlend_Copy opa=%d", opa);
+		}
+	}
+	if (!rmethod) rmethod = mgr->GetRenderMethod(opa, hda, method);
 	if (!rmethod) { /*__android_log_print(ANDROID_LOG_INFO, "##krkr", "BLT: no rmethod...");*/ return false; }
 	iTVPTexture2D *reftex = GetTexture();
 		//__android_log_print(ANDROID_LOG_INFO, "##krkr", "BLT: OperateRect destTex=%p srcTex=%p rect=(%d,%d-%d,%d) opa=%d hda=%d method=%d",

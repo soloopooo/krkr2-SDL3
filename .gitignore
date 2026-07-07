@@ -25,3 +25,14 @@ project/android/app/debug/**
 project/android/app/release/**
 node_modules
 KR_*/
+
+# debug / temp
+debugRdc/
+debugTmp/
+*.rdc
+analyze_rdc.py
+debug-*.md
+
+# vulkan validation layer
+*VkLayer*
+**/jniLibs/*/VkLayer_khronos_validation.*

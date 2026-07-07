@@ -38,6 +38,10 @@
 #include "RectItf.h"
 #include "FontSystem.h"
 #include "tjsDictionary.h"
+
+// Flag set when a child draws to parent's UpdateBitmapForChild temp buffer.
+// Checked by the GPU Blt path to use AlphaBlend_Copy blend.
+bool g_childDrawToTemp = false;
 #include "ConfigManager/IndividualConfigManager.h"
 #include "vkdefine.h"
 #include "RenderManager.h"
@@ -61,9 +65,8 @@ bool TVPFreeUnusedLayerCache = false;
 //---------------------------------------------------------------------------
 
 static bool IsGPU() {
-	static bool isGPU = !TVPIsSoftwareRenderManager()
+	return !TVPIsSoftwareRenderManager()
 		&& !IndividualConfigManager::GetInstance()->GetValue<bool>("ogl_accurate_render", false);
-	return isGPU;
 }
 
 //---------------------------------------------------------------------------
@@ -6032,13 +6035,14 @@ void tTJSNI_BaseLayer::Draw_GPU(tTVPDrawable *target, int x, int y, const tTVPRe
 // 					rect.left >= UpdateExcludeRect.left && rect.right <= UpdateExcludeRect.right) {
 // 				} else
 					CopySelfForRect(UpdateBitmapForChild, 0, 0, rectForChild); // transfer self image
+			} else {
+				// 没有 MainImage（容器层），清除 temp 防止复用上一帧残留画面（画中画 bug）
+				UpdateBitmapForChild->Fill(rectForChild, TransparentColor);
 			}
 
+			// Draw children into temp buffer using AlphaBlend_Copy blend
+			g_childDrawToTemp = true;
 			TVP_LAYER_FOR_EACH_CHILD_BEGIN(child)
-			{
-				// for each child...
-
-				// visible check
 				if (!child->Visible) continue;
 
 				// intersection check
@@ -6053,8 +6057,8 @@ void tTJSNI_BaseLayer::Draw_GPU(tTVPDrawable *target, int x, int y, const tTVPRe
 
 				// call children's "Draw" method
 				child->Draw_GPU((tTVPDrawable*)this, UpdateRectForChild.left, UpdateRectForChild.top, UpdateRectForChild);
-			}
 			TVP_LAYER_FOR_EACH_CHILD_END
+			g_childDrawToTemp = false;
 			// rect.set_offsets(0, 0);
 			target->DrawCompleted(rctar, UpdateBitmapForChild, rect, DisplayType, Opacity);
 			if (useTemp) tTVPTempBitmapHolder::FreeTemp();
@@ -6064,39 +6068,45 @@ void tTJSNI_BaseLayer::Draw_GPU(tTVPDrawable *target, int x, int y, const tTVPRe
 			if (!(Manager && Manager->GetPrimaryLayer() == this))
 				DrawSelf(target, rctar, rect);
 		} else {
-			DrawnRegion.Clear();
-			// send completion message to the target
+			// Use temp buffer even at opa=255 to avoid double-compositing
+			// when the same layer is updated twice in one frame. Children
+			// draw to temp, then temp composited to target at layer opacity.
+			bool useTemp = false;
+			if (GetCacheEnabled()) {
+				UpdateBitmapForChild = CacheBitmap;
+			} else {
+				useTemp = true;
+				UpdateBitmapForChild = tTVPTempBitmapHolder::GetTemp(
+					Rect.get_width(), Rect.get_height());
+			}
+			tTVPRect rectForChild(0, 0, Rect.get_width(), Rect.get_height());
 
-// 			if (UpdateExcludeRect.top <= rect.top && UpdateExcludeRect.bottom >= rect.bottom &&
-// 				rect.left >= UpdateExcludeRect.left && rect.right <= UpdateExcludeRect.right) {
-// 			} else 
-		// Skip DrawSelf for the primary layer when it has no content to draw.
-		// The primary layer's MainImage is transparent black (cleared to 0),
-		// and drawing it via CopyColor overwrites the DrawBuffer, losing the
-		// previous frame's rendered content. This matches the software renderer's
-		// behavior where the DrawBuffer retains pixels across frames.
-		{
-			tTVPRect rc(rect);
-			if (!(Manager && Manager->GetPrimaryLayer() == this))
-				DrawSelf(target, rctar, rc);
-		}
+			if (MainImage != NULL) {
+				CopySelfForRect(UpdateBitmapForChild, 0, 0, rectForChild);
+			} else {
+				// 没有 MainImage（容器层），清除 temp 防止复用上一帧残留画面（画中画 bug）
+				UpdateBitmapForChild->Fill(rectForChild, TransparentColor);
+			}
 
+			// Draw children into temp buffer using AlphaBlend_Copy blend
+			g_childDrawToTemp = true;
 			TVP_LAYER_FOR_EACH_CHILD_BEGIN(child)
 			{
-				// for each child...
-
-				// visible check
 				if (!child->Visible) continue;
-
-				// intersection check
-				tTVPRect chrect;
-				if (!TVPIntersectRect(&chrect, rect, child->Rect))
+				if (!TVPIntersectRect(&UpdateRectForChild, rectForChild, child->Rect))
 					continue;
-
-				// call children's "Draw" method
-				child->Draw_GPU(target, x, y, rect);
+				UpdateOfsX = 0; UpdateOfsY = 0;
+				UpdateRectForChildOfsX = UpdateRectForChild.left - child->Rect.left;
+				UpdateRectForChildOfsY = UpdateRectForChild.top - child->Rect.top;
+				child->Draw_GPU((tTVPDrawable*)this, UpdateRectForChild.left,
+					UpdateRectForChild.top, UpdateRectForChild);
 			}
 			TVP_LAYER_FOR_EACH_CHILD_END
+			g_childDrawToTemp = false;
+
+			rect.set_offsets(0, 0);
+			target->DrawCompleted(rctar, UpdateBitmapForChild, rect, DisplayType, Opacity);
+			if (useTemp) tTVPTempBitmapHolder::FreeTemp();
 		}
 	}
 

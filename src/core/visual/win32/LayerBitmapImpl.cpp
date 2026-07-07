@@ -852,12 +852,12 @@ bool tTVPNativeBaseBitmap::InternalBlendText(
 	iTVPRenderMethod * method = nullptr;
 	int opa_id, clr_id;
 #define GEMTHOD_OPA_CLR(n) \
-	static iTVPRenderMethod *_method = TVPGetRenderManager()->GetRenderMethod(#n); \
-	static int _opa_id = _method->EnumParameterID("opacity"); \
-	static int _clr_id = _method->EnumParameterID("color"); \
+	iTVPRenderMethod *_method = TVPGetRenderManager()->GetRenderMethod(#n); \
+	int _opa_id = _method->EnumParameterID("opacity"); \
+	int _clr_id = _method->EnumParameterID("color"); \
 	method = _method; opa_id = _opa_id; clr_id = _clr_id;
 
-	static bool fastGPURoute = !TVPIsSoftwareRenderManager()
+	bool fastGPURoute = !TVPIsSoftwareRenderManager()
 		&& !IndividualConfigManager::GetInstance()->GetValue<bool>("ogl_accurate_render", false);
 
 	iTVPTexture2D *pTexSrc;

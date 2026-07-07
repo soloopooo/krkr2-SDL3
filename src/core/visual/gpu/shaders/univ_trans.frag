@@ -21,6 +21,6 @@ void main() {
     vec4 rule = texture(tex2, uv);
     float opa = clamp((rule.r - phase) / (vague + 0.0001), 0.0, 1.0);
     s1.rgb = mix(s2.rgb, s1.rgb, opa);
-    s1.a *= opacity;
+    s1.a = mix(s2.a, s1.a, opa) * opacity;
     FragColor = s1;
 }

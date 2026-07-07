@@ -45,6 +45,56 @@
 - Key files: `WindowLayer_sdl.cpp`, `krkr2_android_sdl.cpp`, `RenderManager_gpu.cpp`.
 - See [`SDL3_MIGRATION.md`](SDL3_MIGRATION.md) for the full migration history.
 
+## Phase 6.1 — GPU Renderer Fixes (Active)
+
+The SDL3 GPU renderer (`src/core/visual/gpu/`) has known bugs and missing features vs the software compositor. See **[GPU_RENDERER_BUGS_DIAGNOSIS.md](GPU_RENDERER_BUGS_DIAGNOSIS.md)** for full details.
+
+### Status Summary
+
+| Bug | Description | Status |
+|-----|-------------|--------|
+| ① Gray over-read | Heap overread on 8bpp Gray textures | ✅ Fixed |
+| ② CPU m_pixels desync | `m_pixels` always zero after GPU upload | ✅ Fixed |
+| ③ crossfade alpha=1.0 | `crossfade.frag` forces opaque output | ❌ Open |
+| ④ Clear color opaque black | Frame clear uses `(0,0,0,1)` not `(0,0,0,0)` | ✅ Fixed |
+| ⑤ ApplyColorMap shader | No custom shader, no text_color uniform → black text | ❌ Open |
+| ⑥ CreateTexture2D copy | `CreateTexture2D(w,h,tex)` drops content | ✅ Fixed |
+| ⑦ AlphaBlend_a blend + shader | Blend: fixed. quad.frag opacity only on alpha (not RGB) | 🔶 Partial |
+| ⑧ IsGPU() static cache | Function-local static cached first result forever | ✅ Fixed |
+| ⑨ fastGPURoute static | `fastGPURoute` fixed; `GEMTHOD_OPA_CLR` macro still uses static | 🔶 Partial |
+
+### Implementation Phases
+
+| Phase | Name | Effort | Description |
+|-------|------|--------|-------------|
+| **P0** | ApplyColorMap + R8 Gray | ~2 days | Custom `apply_colormap.frag` shader with `text_color` uniform. Switch Gray textures to `R8_UNORM` (75% VRAM savings). Fixes all text rendering. |
+| **P1a** | quad shader split | ~0.5 day | Split `quad.frag` → `quad.frag` (standard blend, alpha-only opacity) + `quad_pma.frag` (premultiplied blend, full RGBA×opacity). Fixes Bug ⑦b. |
+| **P1b** | crossfade shader fix | ~1 day | Remove `a=1.0` hardcode, add separate UVs per texture, add `_d`/`_a` variants. Fixes Bug ③. |
+| **P1c** | Photoshop blend shaders | ~3 days | 9 new SPIR-V fragment shaders (overlay, hardlight, softlight, colordodge, colorburn, lighten, darken, diff, exclusion). Each uses 2-pass (CopyPass destination→sampler texture, then shader read). Fixes Ps* blend approximations. |
+| **P2** | Render pass batching | ~3 days | Batch all `OperateRect` calls to the same render target into one `SDL_GPURenderPass`. Eliminates per-op tile flush on Mali/Adreno. ~10-30x reduction in render pass count per frame. |
+| **P3a** | Dest-alpha (_d) variants | ~2 days | 2-pass approach for `AlphaBlend_d`, `ApplyColorMap_d`, `ConstAlphaBlend_d`, `Crossfade_d`. Uses opacity-on-opacity LUT in UBO. |
+| **P3b** | Gamma shader alignment | ~1 day | Match software `TVPAdjustGamma` per-channel formula (exp/ln with floor/ceil) instead of pow-based gamma+brightness+contrast. |
+| **P3c** | Split texture (giant bitmaps) | ~2 days | Port `tTVPOGLTexture2D_split` from KrKr2-Next. Tiled sub-textures for images exceeding GPU max texture size. |
+| **P3d** | AssignTexture identity | ~0.5 day | Store `SDL_GPUTexture*` reference instead of GPU copy pass. Eliminates redundant GPU→GPU blit. |
+
+### Key Files
+
+```
+src/core/visual/gpu/RenderManager_gpu.cpp  — Main GPU renderer (1455 lines, ~30 pipelines)
+src/core/visual/gpu/RenderManager_gpu.h    — Class declarations
+src/core/visual/gpu/shaders/               — 12 GLSL shaders + 12 SPIR-V binaries
+src/core/visual/gpu/shaders/shaders_inc.h  — Embedded SPIR-V as C arrays
+src/core/visual/LayerIntf.cpp              — IsGPU(), Draw_GPU(), compositing dispatch
+src/core/visual/LayerBitmapIntf.cpp        — AssignTexture skip, OperateRect for GPU
+src/core/visual/win32/LayerBitmapImpl.cpp  — fastGPURoute, GEMTHOD_OPA_CLR macros
+```
+
+### Reference: SDL3 Subpass Input (Unavailable)
+
+SDL 3.4.10 GPU API has a **flat render pass model** — no subpass concept, no `InputAttachment` support, no `framebuffer_fetch` equivalent. All destination-read operations (_d variants, PS blends) must use the 2-pass approach: CopyPass target→sampler texture → RenderPass with dual-texture shader.
+
+---
+
 ## Phase 7 — Unit tests (proposed)
 
 - **Goal:** Add a host-executable test suite (Google Test) targeting pure-logic engine components that don't require Android/cocos runtime.
