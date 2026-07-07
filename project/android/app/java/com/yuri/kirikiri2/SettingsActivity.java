@@ -27,7 +27,9 @@ public class SettingsActivity extends AppCompatActivity {
 	private File mPrefFile;
 
 	private Switch mSetShowFps, mSetOutputLog, mSetKeepScreen, mSetHideSysBtn, mSetRemLastPath, mSetForceDefFont;
+	private Switch mSetDebugLayer;
 	private MaterialButton mBtnFps, mBtnRenderer, mBtnMemUsage, mBtnDrawThreads, mBtnTexCompress, mBtnDefFont, mBtnFontScale;
+	private MaterialButton mBtnDebugPort;
 	private SeekBar mCursorBar;
 	private TextView mCursorVal;
 
@@ -46,6 +48,8 @@ public class SettingsActivity extends AppCompatActivity {
 		mSetHideSysBtn = findViewById(R.id.setHideSysBtn);
 		mSetRemLastPath = findViewById(R.id.setRemLastPath);
 		mSetForceDefFont = findViewById(R.id.setForceDefFont);
+		mSetDebugLayer = findViewById(R.id.setDebugLayer);
+		mBtnDebugPort = findViewById(R.id.setDebugPort);
 		mBtnFps = findViewById(R.id.setFpsLimit);
 		mBtnRenderer = findViewById(R.id.setRenderer);
 		mBtnMemUsage = findViewById(R.id.setMemUsage);
@@ -75,6 +79,19 @@ public class SettingsActivity extends AppCompatActivity {
 		mSetHideSysBtn.setOnCheckedChangeListener((b, v) -> save("hide_android_sys_btn", v));
 		mSetRemLastPath.setOnCheckedChangeListener((b, v) -> save("remember_last_path", v));
 		mSetForceDefFont.setOnCheckedChangeListener((b, v) -> save("force_default_font", v));
+		mSetDebugLayer.setOnCheckedChangeListener((b, v) -> save("debug_layer", v));
+
+		mBtnDebugPort.setOnClickListener(v -> {
+			String[] items = {"0", "9999", "10000", "12345", "20000", "32767", "44444"};
+			String[] labels = {"Disabled", "9999", "10000", "12345", "20000", "32767", "44444"};
+			new AlertDialog.Builder(this)
+				.setTitle("Debug TCP Port")
+				.setItems(labels, (d, i) -> {
+					mBtnDebugPort.setText(labels[i]);
+					save("debug_tcp_port", items[i]);
+				})
+				.show();
+		});
 
 		mBtnFps.setOnClickListener(v -> {
 			String[] items = {"0", "120", "90", "75", "60", "45", "30", "15"};
@@ -249,6 +266,13 @@ public class SettingsActivity extends AppCompatActivity {
 		mSetHideSysBtn.setChecked(getBool("hide_android_sys_btn", false));
 		mSetRemLastPath.setChecked(getBool("remember_last_path", true));
 		mSetForceDefFont.setChecked(getBool("force_default_font", false));
+		mSetDebugLayer.setChecked(getBool("debug_layer", false));
+
+		String[] portItems = {"0", "9999", "10000", "12345", "20000", "32767", "44444"};
+		String[] portLabels = {"Disabled", "9999", "10000", "12345", "20000", "32767", "44444"};
+		String port = getStr("debug_tcp_port", "0");
+		mBtnDebugPort.setText(pickLabel(port, portItems, portLabels));
+
 		mBtnFps.setText(getStr("fps_limit", "60"));
 
 		String ren = getStr("renderer", "software");
