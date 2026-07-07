@@ -6,6 +6,7 @@
 #include "LayerBitmapIntf.h"
 #include "GraphicsLoaderIntf.h"
 #include "Application.h"
+#include "environ/sdl/DebugLayer.h"
 #include <android/log.h>
 #include <cstring>
 #include <new>
@@ -1653,6 +1654,61 @@ void TVPRenderManager_GPU::OperateRect(iTVPRenderMethod* method,
 		float a = (float)gpuMethod->m_opacity / 255.0f;
 		SDL_FColor bc = { a, a, a, a };
 		SDL_SetGPUBlendConstants(m_currentPass, bc);
+	}
+
+	// DEBUG RECORDING: capture draw call metadata for replay
+	{
+		auto* dbgLayer = TVPDebugLayer::Instance();
+		if (dbgLayer->IsRecording()) {
+			TVPDrawCallInfo info;
+			info.methodName = mname;
+			info.rect = rctar;
+			info.opacity = gpuMethod->m_opacity / 255.0f;
+			info.needsDestRead = gpuMethod->m_needsDestRead;
+			// UV from first texture
+			if (textures.size() > 0) {
+				auto* src = dynamic_cast<tTVPGPUTexture2D*>(textures[0].first);
+				if (src) {
+					const tTVPRect &sr = textures[0].second;
+					info.uvOffset[0] = (float)sr.left / src->GetWidth();
+					info.uvOffset[1] = (float)sr.top / src->GetHeight();
+					info.uvScale[0] = (float)sr.get_width() / src->GetWidth();
+					info.uvScale[1] = (float)sr.get_height() / src->GetHeight();
+				}
+			}
+			// UV from second texture (crossfade)
+			bool isXFade = (mname.find("ConstAlphaBlend_SD") != std::string::npos ||
+			                mname.find("ConstColorAlphaBlend_SD") != std::string::npos);
+			if (isXFade && textures.size() > 1) {
+				auto* src2 = dynamic_cast<tTVPGPUTexture2D*>(textures[1].first);
+				if (src2) {
+					const tTVPRect &sr2 = textures[1].second;
+					info.uvOffset1[0] = (float)sr2.left / src2->GetWidth();
+					info.uvOffset1[1] = (float)sr2.top / src2->GetHeight();
+					info.uvScale1[0] = (float)sr2.get_width() / src2->GetWidth();
+					info.uvScale1[1] = (float)sr2.get_height() / src2->GetHeight();
+				}
+			}
+			// Color UBO for ApplyColorMap etc.
+			info.hasColorUBO = (mname.find("ApplyColorMap") != std::string::npos ||
+			                    mname.find("ConstColorAlphaBlend_d") != std::string::npos);
+			if (info.hasColorUBO) {
+				info.colorUBO[0] = gpuMethod->GetConstColor(0);
+				info.colorUBO[1] = gpuMethod->GetConstColor(1);
+				info.colorUBO[2] = gpuMethod->GetConstColor(2);
+				info.colorUBO[3] = gpuMethod->GetConstColor(3);
+			}
+			// Source textures
+			for (size_t i = 0; i < textures.size(); i++) {
+				TVPDrawCallInfo::Source s;
+				s.tex = textures[i].first;
+				info.sources.push_back(s);
+			}
+			// Target
+			info.target = tar;
+			dbgLayer->RecordDrawCall(info);
+			return; // Skip actual GPU draw in recording mode
+		}
 	}
 
 	// Draw

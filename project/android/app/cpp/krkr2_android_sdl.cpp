@@ -22,6 +22,7 @@
 #include "ConfigManager/GlobalConfigManager.h"
 #include "ConfigManager/LocaleConfigManager.h"
 #include "Platform.h"
+#include "environ/sdl/DebugLayer.h"
 
 #include "breakpad/client/linux/handler/exception_handler.h"
 #include "breakpad/client/linux/handler/minidump_descriptor.h"
@@ -446,6 +447,17 @@ extern "C" int SDL_main(int argc, char *argv[]) {
 
 	// Set global flag for render manager selection
 	g_VulkanDisplayActive = gpuInitialized;
+
+	// Start debug TCP server if configured
+	{
+		int debugPort = GlobalConfigManager::GetInstance()
+			->GetValue<int>("debug_tcp_port", 0);
+		if (debugPort > 0) {
+			TVPDebugLayer::Instance()->StartServer(debugPort);
+			__android_log_print(ANDROID_LOG_INFO, TAG,
+				"Debug TCP server started on port %d", debugPort);
+		}
+	}
 
 	// Init locale
 	LocaleConfigManager::GetInstance()->Initialize(TVPGetCurrentLanguage());

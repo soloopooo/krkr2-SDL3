@@ -36,6 +36,7 @@ bool g_VulkanDisplayActive = false;
 #include "visual/gpu/RenderManager_gpu.h"
 #include "ConfigManager/GlobalConfigManager.h"
 #include "Platform.h"
+#include "environ/sdl/DebugLayer.h"
 
 #define TAG "##krkr"
 
@@ -450,9 +451,20 @@ static void _updateDebugOverlayJNI(bool firstCheck, int activeDraws = 0, uint64_
 	lastFpsTime = now;
 	float instFps = (dtSec > 0.0f) ? (1.0f / dtSec) : 0.0f;
 
-	char text[128];
-	snprintf(text, sizeof(text), "%.0f (%d draws)\n%d MB(%.2f MB) %d MB",
-		instFps, activeDraws, TVPGetSelfUsedMemory(), (float)(vramSize >> 10) / 1024.0f, TVPGetSystemFreeMemory());
+	char text[256];
+	{
+		auto* dbg = TVPDebugLayer::Instance();
+		const char* dmode = "NORM";
+		if (dbg->GetMode() == TVPDebugLayer::STEP) dmode = "STEP";
+		else if (dbg->GetMode() == TVPDebugLayer::SLOWMO) dmode = "SLOW";
+		else if (dbg->GetMode() == TVPDebugLayer::DRAW_CALL_NAV) dmode = "NAV";
+		int navIdx = dbg->GetNavIndex();
+		int callCnt = dbg->GetCallCount();
+		snprintf(text, sizeof(text), "%.0f (%d) %s\n%dM %.2fM %dM\ncalls %d nav %d",
+			instFps, activeDraws, dmode,
+			TVPGetSelfUsedMemory(), (float)(vramSize >> 10) / 1024.0f, TVPGetSystemFreeMemory(),
+			callCnt, navIdx);
+	}
 
 	// Update Android overlay via JNI
 	JNIEnv *env = jni::GetEnv();
@@ -504,10 +516,36 @@ void TVPEngineTick() {
 		_updateDebugOverlayJNI(true);
 		firstFrame = false;
 	}
+
+	auto* dbgLayer = TVPDebugLayer::Instance();
+
+	// In DRAW_CALL_NAV mode: skip engine logic, just replay and present
+	if (dbgLayer->GetMode() == TVPDebugLayer::DRAW_CALL_NAV) {
+		bool gpuActive = !TVPGetRenderManager()->IsSoftware();
+		if (gpuActive) {
+			auto* gpu = TVPRenderManager_GPU::Instance();
+			gpu->BeginFrame();
+			dbgLayer->OnFrameBegin();
+			// No ::Application->Run() — engine tick skipped in nav mode
+			// No compositing — replay runs instead
+			dbgLayer->OnFrameEnd();
+			gpu->EndFrame();
+		} else {
+			dbgLayer->OnFrameBegin();
+			dbgLayer->OnFrameEnd();
+		}
+		// ~30 fps for nav browsing
+		SDL_Delay(33);
+		_updateDebugOverlayJNI(false, 0, 0);
+		return;
+	}
+
 	auto tickStart = std::chrono::steady_clock::now();
 
 	DrainAndroidEventQueue();
 	TVPProcessSDLEvents();
+
+	dbgLayer->OnFrameBegin();
 
 	bool gpuActive = !TVPGetRenderManager()->IsSoftware();
 	if (gpuActive) {
@@ -741,7 +779,7 @@ void TVPEngineTick() {
 		}
 	}
 
-	// Frame rate limiting (1 FPS when capture mode is active)
+	// Frame rate limiting (with debug slow-mo override)
 	{
 		static int s_fpsLimit = 60;
 		static int s_refreshCounter = 0;
@@ -750,10 +788,10 @@ void TVPEngineTick() {
 			s_refreshCounter = 0;
 			s_fpsLimit = GlobalConfigManager::GetInstance()->GetValue<int>("fps_limit", 60);
 		}
-		// (capture mode removed — use RenderDoc in-app API instead)
 		auto frameElapsed = std::chrono::duration_cast<std::chrono::microseconds>(
 			std::chrono::steady_clock::now() - tickStart).count();
-		int targetUs = s_fpsLimit > 0 ? (1000000 / s_fpsLimit) : 0;
+		int baseTargetUs = s_fpsLimit > 0 ? (1000000 / s_fpsLimit) : 0;
+		int targetUs = dbgLayer->OnRateLimit(baseTargetUs);
 		if (targetUs > 0 && frameElapsed < targetUs) {
 			SDL_Delay((targetUs - (int)frameElapsed) / 1000);
 		}
@@ -775,8 +813,11 @@ void TVPEngineTick() {
 			g_stats = { std::chrono::steady_clock::now(), 0, 0, 0, 0 };
 		}
 
-		// Android native overlay (FPS/memory) — works for both Software and Vulkan modes
+		// Android native overlay (FPS/memory + debug info)
 		_updateDebugOverlayJNI(false, activeDraws, vramSize);
+
+	dbgLayer->OnFrameEnd();
+
 	TVPUpdateCursorOverlay();
 }
 

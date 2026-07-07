@@ -279,6 +279,11 @@ public:
 	// RenderDoc capture trigger — sets m_captureThisFrame so the next
 	// BeginFrame/EndFrame pair wraps a capture with StartFrameCapture/EndFrameCapture.
 	void TriggerRenderDocCapture();
+
+	// Accessors for DebugLayer replay
+	SDL_GPUDevice* GetDevice() const { return m_device; }
+	SDL_GPUSampler* GetSampler() const { return m_sampler; }
+	SDL_GPUBuffer* GetQuadVerts() const { return m_quadVerts; }
 };
 
 // Registration
