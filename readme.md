@@ -6,7 +6,7 @@
 
 此工程本身仅作为一个实验，验证目前只使用开源大模型（Deepseek, GLM）能否完全做到 GPU Vulkan 与原版 CPU 渲染效果一致。
 
-详情代码请见 SDL3-debug-GPU 分支。
+详情代码请见 sdl3-debug-layer 分支。
 
 
 
