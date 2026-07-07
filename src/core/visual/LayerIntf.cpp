@@ -6029,15 +6029,15 @@ void tTJSNI_BaseLayer::Draw_GPU(tTVPDrawable *target, int x, int y, const tTVPRe
 			}
 			tTVPRect rectForChild(0, 0, Rect.get_width(), Rect.get_height());
 
+			// 清除 temp 防止复用上一帧残留画面（画中画 bug）
+			// 无论是否有 MainImage，复用池的 texture 都可能残留旧帧内容
+			UpdateBitmapForChild->Fill(rectForChild, TransparentColor);
 			// copy self image to UpdateBitmapForChild
 			if (MainImage != NULL) {
 // 				if (UpdateExcludeRect.top <= rect.top && UpdateExcludeRect.bottom >= rect.bottom &&
 // 					rect.left >= UpdateExcludeRect.left && rect.right <= UpdateExcludeRect.right) {
 // 				} else
 					CopySelfForRect(UpdateBitmapForChild, 0, 0, rectForChild); // transfer self image
-			} else {
-				// 没有 MainImage（容器层），清除 temp 防止复用上一帧残留画面（画中画 bug）
-				UpdateBitmapForChild->Fill(rectForChild, TransparentColor);
 			}
 
 			// Draw children into temp buffer using AlphaBlend_Copy blend
@@ -6081,11 +6081,10 @@ void tTJSNI_BaseLayer::Draw_GPU(tTVPDrawable *target, int x, int y, const tTVPRe
 			}
 			tTVPRect rectForChild(0, 0, Rect.get_width(), Rect.get_height());
 
+			// 清除 temp 防止复用上一帧残留画面（画中画 bug）
+			UpdateBitmapForChild->Fill(rectForChild, TransparentColor);
 			if (MainImage != NULL) {
 				CopySelfForRect(UpdateBitmapForChild, 0, 0, rectForChild);
-			} else {
-				// 没有 MainImage（容器层），清除 temp 防止复用上一帧残留画面（画中画 bug）
-				UpdateBitmapForChild->Fill(rectForChild, TransparentColor);
 			}
 
 			// Draw children into temp buffer using AlphaBlend_Copy blend
