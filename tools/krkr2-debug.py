@@ -6,23 +6,28 @@ Usage:
   adb forward tcp:9999 tcp:9999   (one-time setup)
   python3 krkr2-debug.py          (start interactive UI)
 
-Keyboard shortcuts within UI:
+Keyboard shortcuts (immediate — no Enter key needed):
   Space   Step one frame
   s       Toggle slow-mo (0.5x / 1.0x)
   c       Capture textures for current frame
   r       Trigger RenderDoc capture (.rdc)
   n       Next draw call (in NAV mode)
   p       Previous draw call (in NAV mode)
-  m       Toggle mode: NORMAL -> STEP -> SLOWMO
+  m       Toggle mode: NORMAL -> STEP -> SLOWMO -> NAV
   q       Quit
 """
-import socket, struct, sys, time, os, subprocess, threading
+import socket, struct, sys, time, subprocess, select
+
+try:
+    import termios, tty
+    HAVE_TTY = True
+except ImportError:
+    HAVE_TTY = False
 
 HOST = "127.0.0.1"
 PORT = 9999
 
 def send(cmd: int, payload: bytes = b"") -> bytes:
-    """Send a command and return response."""
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(5)
     s.connect((HOST, PORT))
@@ -33,35 +38,27 @@ def send(cmd: int, payload: bytes = b"") -> bytes:
 
 def step():
     send(0x01)
-    print("  > Step")
 
 def set_mode(m: int):
     send(0x02, bytes([m]))
-    print(f"  > Mode {m}")
 
 def set_rate(r: float):
     send(0x03, struct.pack("<f", r))
-    print(f"  > SlowMo {r:.2f}x")
 
 def capture():
     send(0x04)
-    print("  > Capture triggered")
 
 def nav_next():
     send(0x05)
-    print("  > Nav next")
 
 def nav_prev():
     send(0x06)
-    print("  > Nav prev")
 
 def nav_set(idx: int):
     send(0x07, struct.pack("<i", idx))
-    print(f"  > Nav to {idx}")
 
 def trigger_rdoc():
     send(0x08)
-    print("  > RenderDoc capture triggered")
 
 def get_status():
     resp = send(0x09)
@@ -86,66 +83,96 @@ def get_draw_call_info(idx: int):
     return None
 
 def pull_captures():
-    """Pull captured textures from device."""
-    print("  > Pulling captures...")
     subprocess.run(
         ["adb", "pull", "/sdcard/Download/krkr2_debug", "./krkr2_debug"],
         capture_output=True
     )
-    print("  > Done")
+
+MODE_NAMES = ["NORM", "STEP", "SLOW", "NAV"]
 
 def interactive():
-    """Simple input-based interactive loop."""
-    mode_names = ["NORM", "STEP", "SLOW", "NAV"]
     print("\n=== Krkr2 Yuri Debugger ===")
-    print("Connected to ADB port 9999")
-    print("Keys: [Space]Step [s]lowmo [c]apture [r]doc [n]ext [p]rev [m]ode [q]uit\n")
+    print("Keys: [Space]Step [s]lowmo [c]apture [r]doc [n/p]nav [m]ode [q]uit\n")
 
     last_refresh = 0
-    while True:
-        now = time.time()
-        if now - last_refresh > 0.5:
-            fc, cc, ni, md = get_status()
-            mode_name = mode_names[md] if md < len(mode_names) else "?"
-            ni_str = f"{ni}/{cc}" if ni >= 0 else "final"
-            detail = ""
-            if ni >= 0:
-                info = get_draw_call_info(ni)
-                if info:
-                    name, l, t, w, h = info
-                    detail = f"  [{name}] rect=({l},{t},{w},{h})"
-            print(f"\r  FRM {fc} | {mode_name} | call {ni_str} | {detail}", end=" " * 10)
-            last_refresh = now
+    status_line = ""
 
-        import select
-        if select.select([sys.stdin], [], [], 0.1)[0]:
-            ch = sys.stdin.read(1)
-            if ch == ' ':
-                step()
-            elif ch == 's':
-                set_rate(0.5 if get_status()[3] != 2 else 1.0)
-            elif ch == 'c':
-                capture()
-            elif ch == 'r':
-                trigger_rdoc()
-            elif ch == 'n':
-                nav_next()
-            elif ch == 'p':
-                nav_prev()
-            elif ch == 'm':
-                set_mode((get_status()[3] + 1) % 4)
-            elif ch == 'P':
-                pull_captures()
-            elif ch == 'q':
-                print("\n  Quit")
-                break
-            last_refresh = 0  # refresh immediately after action
+    if HAVE_TTY:
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        tty.setraw(fd)
+
+    try:
+        while True:
+            now = time.time()
+
+            # Refresh status display every 0.3s
+            if now - last_refresh > 0.3:
+                try:
+                    fc, cc, ni, md = get_status()
+                    mode_name = MODE_NAMES[md] if md < len(MODE_NAMES) else "?"
+                    ni_str = f"{ni}/{cc}" if ni >= 0 else "final"
+                    detail = ""
+                    if ni >= 0:
+                        info = get_draw_call_info(ni)
+                        if info:
+                            n, l, t, w, h = info
+                            detail = f"  [{n}] ({l},{t},{w}×{h})"
+                    status_line = f"  FRM {fc} | {mode_name} | call {ni_str}{detail}"
+                    # Clear line and reprint
+                    sys.stdout.write("\r\033[K" + status_line)
+                    sys.stdout.flush()
+                except Exception:
+                    pass
+                last_refresh = now
+
+            # Check for keypress (non-blocking)
+            if select.select([sys.stdin], [], [], 0.05)[0]:
+                ch = sys.stdin.read(1)
+                # Visual feedback on same line
+                action = ""
+                if ch == ' ':
+                    step(); action = "Step"
+                elif ch == 's':
+                    try:
+                        _, _, _, cur_md = get_status()
+                        set_rate(0.5 if cur_md != 2 else 1.0)
+                        action = "SlowMo " + ("0.5x" if cur_md != 2 else "1.0x")
+                    except Exception:
+                        action = "SlowMo err"
+                elif ch == 'c':
+                    capture(); action = "Capture"
+                elif ch == 'r':
+                    trigger_rdoc(); action = "RDC"
+                elif ch == 'n':
+                    nav_next(); action = "NavNext"
+                elif ch == 'p':
+                    nav_prev(); action = "NavPrev"
+                elif ch == 'm':
+                    try:
+                        _, _, _, cur_md = get_status()
+                        set_mode((cur_md + 1) % 4)
+                        action = f"Mode {MODE_NAMES[(cur_md+1)%4]}"
+                    except Exception:
+                        action = "Mode err"
+                elif ch == 'P':
+                    pull_captures(); action = "Pulling..."
+                elif ch == 'q':
+                    break
+                if action:
+                    sys.stdout.write(f"\n\033[K  > {action}")
+                    sys.stdout.flush()
+                    last_refresh = 0  # force refresh
+    finally:
+        if HAVE_TTY:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        print("\n  Quit")
 
 if __name__ == "__main__":
     try:
         interactive()
-    except KeyboardInterrupt:
-        print("\n  Interrupted")
     except ConnectionRefusedError:
         print("ERROR: Cannot connect. Did you run: adb forward tcp:9999 tcp:9999")
         sys.exit(1)
+    except KeyboardInterrupt:
+        print("\n  Interrupted")
