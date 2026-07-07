@@ -83,10 +83,6 @@ public:
 	int GetReplayW() const { return m_replayW; }
 	int GetReplayH() const { return m_replayH; }
 
-	// --- RenderDoc capture ---
-	void TriggerRDOCapture();
-	bool IsRDOCapturePending() const { return m_pendingRDocCapture; }
-
 	// --- TCP command server ---
 	void StartServer(int port);
 	void StopServer();
@@ -95,12 +91,6 @@ public:
 	// --- Texture capture (save frame to disk) ---
 	void CaptureFrame();
 	void SetOutputDir(const std::string& dir);
-
-	// --- Overlay rendering (called after game content on swapchain) ---
-	void RenderOverlay(SDL_GPURenderPass* rp,
-		SDL_GPUDevice* dev, SDL_GPUSampler* sampler,
-		SDL_GPUBuffer* quadVerts,
-		int swW, int swH);
 
 private:
 	TVPDebugLayer();
@@ -132,9 +122,6 @@ private:
 	// Capture
 	std::string m_outDir;
 	int m_seqNum = 0;
-
-	// RenderDoc
-	std::atomic<bool> m_pendingRDocCapture{false};
 
 	// Replay
 	SDL_GPUDevice* m_replayDev = nullptr;

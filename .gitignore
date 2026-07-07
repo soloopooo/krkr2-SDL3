@@ -26,6 +26,9 @@ project/android/app/release/**
 node_modules
 KR_*/
 
+# compiled shader binaries
+*.spv
+
 # debug / temp
 debugRdc/
 debugTmp/

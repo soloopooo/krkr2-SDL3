@@ -1,232 +1,138 @@
 #pragma once
 #include <SDL3/SDL_gpu.h>
-#include <atomic>
 #include <vector>
-#include <map>
 #include <unordered_map>
+#include <string>
+#include <cstdint>
 #include "RenderManager.h"
-#include "renderdoc_app.h"
 
-class tTJSNI_Window;
-
-//------------------------------------------------------------------------------
-// GPU display mode
-//------------------------------------------------------------------------------
-enum class DisplayMode {
-	SOFTWARE,
-	VULKAN
-};
-extern DisplayMode g_displayMode;
-extern SDL_Window *g_window;
-
-//------------------------------------------------------------------------------
-// tTVPGPUTexture2D — wraps SDL_GPUTexture as iTVPTexture2D
-//------------------------------------------------------------------------------
 class tTVPGPUTexture2D : public iTVPTexture2D {
-	SDL_GPUDevice *m_device;
-	SDL_GPUTexture *m_texture;
-	int m_texW, m_texH;
-	int m_bmpW, m_bmpH;
-	TVPTextureFormat::e m_format;
-	bool m_opaque;
-	// CPU-side pixel buffer for GetScanLineForRead/Write (software compat)
+	friend class TVPRenderManager_GPU;
 	std::vector<uint8_t> m_pixels;
-	int m_width, m_height, m_pitch;
-	bool m_pixelsDirty = false; // Bug #8: GPU wrote to this texture, m_pixels is stale
+	SDL_GPUTexture *m_gpuTex = nullptr;
+	int m_pitch = 0;
+	bool m_cpuDirty = false;
+	bool m_gpuDirty = false;
+	TVPTextureFormat::e m_format = TVPTextureFormat::None;
+	bool m_opaque = false;
+	static std::atomic<uint64_t> s_gpuTotalVMem;
 public:
-	tTVPGPUTexture2D(SDL_GPUDevice *dev, SDL_GPUTexture *tex,
-		int texW, int texH, int w, int h,
-		TVPTextureFormat::e fmt, bool opaque);
+	tTVPGPUTexture2D(int w, int h, TVPTextureFormat::e fmt, bool opaque, const void *pixels = nullptr, int pitch = 0);
 	~tTVPGPUTexture2D() override;
-
-	SDL_GPUTexture *GetGPUTexture() const { return m_texture; }
 
 	TVPTextureFormat::e GetFormat() const override { return m_format; }
 	const void * GetScanLineForRead(tjs_uint l) override;
 	void * GetScanLineForWrite(tjs_uint l) override;
+	tjs_int GetPitch() const override { return m_pitch; }
+
 	void Update(const void *pixel, TVPTextureFormat::e format, int pitch, const tTVPRect& rc) override;
 	uint32_t GetPoint(int x, int y) override;
 	void SetPoint(int x, int y, uint32_t clr) override;
 	bool IsStatic() override { return false; }
 	bool IsOpaque() override { return m_opaque; }
+	void SetOpaque(bool v) { m_opaque = v; }
 	cocos2d::Texture2D* GetAdapterTexture(cocos2d::Texture2D* origTex) override { return nullptr; }
-	bool GetScale(float &x, float &y) override { x = 1.f; y = 1.f; return true; }
-	void SetPixelsDirty() { m_pixelsDirty = true; }  // Bug #8: mark after GPU render target writes
-	void ReadbackToPixels();  // Bug #8: sync m_pixels from GPU texture (RGBA→BGRA swap)
+
+	void UploadToGPU(SDL_GPUDevice *dev);
+	void DownloadFromGPU(SDL_GPUDevice *dev);
+	SDL_GPUTexture* GetGPUTexture() { return m_gpuTex; }
 };
 
-//------------------------------------------------------------------------------
-// tTVPGPURenderMethod — wraps SDL_GPUGraphicsPipeline with blend state
-//------------------------------------------------------------------------------
+struct BlendConfig {
+	bool enable = true;
+	SDL_GPUBlendFactor srcColor = SDL_GPU_BLENDFACTOR_ONE;
+	SDL_GPUBlendFactor dstColor = SDL_GPU_BLENDFACTOR_ZERO;
+	SDL_GPUBlendOp colorOp = SDL_GPU_BLENDOP_ADD;
+	SDL_GPUBlendFactor srcAlpha = SDL_GPU_BLENDFACTOR_ONE;
+	SDL_GPUBlendFactor dstAlpha = SDL_GPU_BLENDFACTOR_ZERO;
+	SDL_GPUBlendOp alphaOp = SDL_GPU_BLENDOP_ADD;
+};
+
 class tTVPGPURenderMethod : public iTVPRenderMethod {
-	SDL_GPUDevice *m_device;
-	SDL_GPUGraphicsPipeline *m_pipeline;
-	SDL_GPUShader *m_vertShader; // kept alive for reuse
-	SDL_GPUShader *m_fragShader;
-	float m_constColor[4];
-	bool m_hasConstantColor;
-	SDL_GPUBlendFactor m_srcColor, m_dstColor, m_srcAlpha, m_dstAlpha;
-	SDL_GPUBlendOp m_colorOp, m_alphaOp;
-	bool m_blendEnabled;
-	int m_numTextures;
-	bool m_needsDestRead = false; // requires 2-pass: copy target→temp before rendering
-
-	// UBO data for shaders with uniforms
-	uint8_t m_uboData[256];
-	int m_uboSize = 0;
-	bool m_uboDirty = false;
-
-	friend class TVPRenderManager_GPU;
-	float m_vague = 0;
-	int m_uboID_Vague = -1;
-	int m_uboID_Phase = -1;
-	int m_opacity = 255;
-
 public:
-	tTVPGPURenderMethod(SDL_GPUDevice *dev,
-		SDL_GPUGraphicsPipeline *pipe,
-		SDL_GPUShader *vs, SDL_GPUShader *fs,
-		const char *name,
-		bool blend, int numTex,
-		SDL_GPUBlendFactor srcC, SDL_GPUBlendFactor dstC,
-		SDL_GPUBlendFactor srcA, SDL_GPUBlendFactor dstA,
-		SDL_GPUBlendOp cOp = SDL_GPU_BLENDOP_ADD,
-		SDL_GPUBlendOp aOp = SDL_GPU_BLENDOP_ADD);
-	~tTVPGPURenderMethod() override;
+	SDL_GPUShader *m_fs = nullptr;
+	int m_numTextures = 1;
+	int m_numUBOs = 1;
+	BlendConfig m_blend;
+	mutable SDL_GPUGraphicsPipeline *m_pipeline = nullptr;
 
-	SDL_GPUGraphicsPipeline *GetPipeline() const { return m_pipeline; }
-	int GetNumTextures() const { return m_numTextures; }
-	float GetConstColor(int i) const { return m_constColor[i]; }
-	bool HasConstantColor() const { return m_hasConstantColor; }
-
-	void SetParameterFloat(int id, float Value) override;
-	void SetParameterInt(int id, int Value) override;
-	void SetParameterPtr(int id, const void *v) override;
-	void SetParameterColor4B(int id, unsigned int clr) override;
-	void SetParameterOpa(int id, int Value) override;
-	iTVPRenderMethod* SetBlendFuncSeparate(int func,
-		int srcRGB, int dstRGB, int srcAlpha, int dstAlpha) override;
-
-	int EnumParameterID(const char *name) override;
+	tTVPGPURenderMethod(SDL_GPUShader *fs, int tex, int ubos, const BlendConfig &b)
+		: m_fs(fs), m_numTextures(tex), m_numUBOs(ubos), m_blend(b) {}
+	SDL_GPUGraphicsPipeline* GetPipeline() { return m_pipeline; }
 };
 
-//------------------------------------------------------------------------------
-// TVPRenderManager_GPU — iTVPRenderManager using SDL_Gpu (Vulkan)
-//------------------------------------------------------------------------------
 class TVPRenderManager_GPU : public iTVPRenderManager {
-	SDL_GPUDevice *m_device = nullptr;
-	SDL_Window *m_window = nullptr;
-	SDL_GPUSampler *m_sampler = nullptr;
-
-	// Shared shaders (from SPIR-V)
-	SDL_GPUShader *m_vs = nullptr; // textured quad vertex
-	SDL_GPUShader *m_fs = nullptr; // textured quad fragment
-	SDL_GPUShader *m_fs_pma = nullptr; // quad fragment — premultiplied alpha (rgb*=opacity)
-
-	// Quad vertex buffer (fullscreen quad)
-	SDL_GPUBuffer *m_quadVerts = nullptr;
-
-	// Frame state
-	SDL_GPUCommandBuffer *m_cmd = nullptr;
-	SDL_GPUTexture *m_swapchainTex = nullptr;
-	SDL_GPURenderPass *m_currentPass = nullptr;
-	iTVPTexture2D *m_currentTarget = nullptr;
-	Uint32 m_swW = 0, m_swH = 0;
-
-	// Readback state (double-buffered with fence)
-	static const int READBACK_SLOTS = 2;
-	struct ReadbackSlot {
-		SDL_GPUTransferBuffer *tb = nullptr;
-		SDL_GPUFence *fence = nullptr;
-		int texW = 0, texH = 0;
-		Uint32 tbSize = 0;  // current capacity of tb
-	};
-	ReadbackSlot m_rbSlot[READBACK_SLOTS];
-
-	// Cached temp texture for dest-read (Ps blends, _d variants)
-	SDL_GPUTexture *m_tempDestCopy = nullptr;
-	int m_tempDestCopyW = 0, m_tempDestCopyH = 0;
-	int m_rbActive = 0; // current slot being filled
-	bool m_hasFrameResult = false;
-	int m_frameW = 0, m_frameH = 0;
-	std::vector<uint8_t> m_framePixels;
-
-	// Pipeline cache
-	SDL_GPUGraphicsPipeline *m_quadPipeline = nullptr;
-	SDL_GPUGraphicsPipeline *m_presentPipeline = nullptr;
-	std::unordered_map<uint32_t, tTVPGPURenderMethod*> m_methodCache;
-
-	// Fullscreen vertex data (2 tris, 6 verts, pos + uv)
-	static const float s_quadVerts[24];
-	int m_drawCount = 0;
-	bool m_frameFirstTarget = true;    // first SetRenderTarget this frame → CLEAR
-	SDL_GPUTextureFormat m_swapFormat; // swapchain format
-	SDL_GPUTextureFormat m_texFormat = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-	SDL_GPUShader *m_fs_gray = nullptr; // grayscale frag shader
-	SDL_GPUShader *m_fs_blur = nullptr; // box blur frag shader
-	SDL_GPUShader *m_fs_adjustGamma = nullptr; // AdjustGamma frag shader (UBO)
-	SDL_GPUShader *m_fs_univTrans = nullptr; // UnivTransBlend frag shader (3tex+UBO)
-	SDL_GPUShader *m_fs_fill = nullptr;      // solid-color fill frag shader
-	SDL_GPUShader *m_fs_present = nullptr;   // present (force alpha=1) frag shader
-	SDL_GPUShader *m_fs_crossfade = nullptr; // crossfade (2-tex blend) frag shader
-	SDL_GPUShader *m_fs_applyColorMap = nullptr;   // ApplyColorMap frag shader (binding 1 UBO)
-	SDL_GPUShader *m_fs_applyColorMap_a = nullptr; // ApplyColorMap_a premultiplied variant
-	SDL_GPUShader *m_fs_psOverlay = nullptr;       // PsOverlayBlend (2-tex dest-read)
-	SDL_GPUShader *m_fs_alphaBlendD = nullptr;     // AlphaBlend_d (2-tex dest-read, opacity-on-opacity)
-	// Photoshop blend shaders (dest-read, 2-texture)
-	SDL_GPUShader *m_fs_psHardLight = nullptr;
-	SDL_GPUShader *m_fs_psSoftLight = nullptr;
-	SDL_GPUShader *m_fs_psColorDodge = nullptr;
-	SDL_GPUShader *m_fs_psColorBurn = nullptr;
-	SDL_GPUShader *m_fs_psDiff = nullptr;
-	SDL_GPUShader *m_fs_psExclusion = nullptr;
-	SDL_GPUShader *m_fs_psLighten = nullptr;
-	SDL_GPUShader *m_fs_psDarken = nullptr;
-	// _d variant shaders (dest-read, opacity-on-opacity)
-	SDL_GPUShader *m_fs_applyColorMap_d = nullptr;
-	SDL_GPUShader *m_fs_constAlphaBlend_d = nullptr;
-	SDL_GPUShader *m_fs_constColorAlphaBlend_d = nullptr;
-
-	// RenderDoc in-app capture
-	void *m_rdoc_lib = nullptr;
-	RENDERDOC_API_1_6_0 *m_rdoc = nullptr;
-	bool m_captureThisFrame = false;
-	void InitRenderDoc();
-
-	SDL_GPUGraphicsPipeline* _CreateQuadPipeline(
-		SDL_GPUTextureFormat format,
-		SDL_GPUBlendFactor srcColor, SDL_GPUBlendFactor dstColor,
-		SDL_GPUBlendFactor srcAlpha, SDL_GPUBlendFactor dstAlpha,
-		SDL_GPUBlendOp colorOp, SDL_GPUBlendOp alphaOp,
-		bool blendEnabled,
-		SDL_GPUShader *fragShader = nullptr,
-		int numSamplers = 1, int numUBO = 0);
-	tTVPGPURenderMethod* _GetOrCreateMethod(const char *name);
-
-	void _BeginFrame();
-	void _EndFramePass();
-	void _PresentToSwapchain();
-
-	static TVPRenderManager_GPU *s_instance;
-	static std::atomic<uint64_t> s_totalVMem;
-	friend class tTVPGPUTexture2D;
-
 public:
+	// Static resources
+	static SDL_GPUDevice *s_device;
+	static SDL_Window *s_window;
+	static SDL_GPUShader *s_vs;
+	static SDL_GPUBuffer *s_quadVerts;
+	static SDL_GPUSampler *s_sampler;
+	static SDL_GPUGraphicsPipeline *s_presentPipe;
+	static SDL_GPUGraphicsPipeline *s_displayPipe;
+
+	// Fragment shaders (created from display_spv.h)
+	static SDL_GPUShader *s_quad_fs;
+	static SDL_GPUShader *s_quad_pma_fs;
+	static SDL_GPUShader *s_present_fs;
+	static SDL_GPUShader *s_fill_fs;
+	static SDL_GPUShader *s_fill_mask_fs;
+	static SDL_GPUShader *s_copy_color_fs;
+	static SDL_GPUShader *s_copy_mask_fs;
+	static SDL_GPUShader *s_copy_opaque_fs;
+	static SDL_GPUShader *s_remove_opacity_fs;
+	static SDL_GPUShader *s_gray_fs;
+	static SDL_GPUShader *s_blur_fs;
+	static SDL_GPUShader *s_gamma_fs;
+	static SDL_GPUShader *s_adjust_gamma_fs;
+	static SDL_GPUShader *s_crossfade_fs;
+	static SDL_GPUShader *s_univ_trans_fs;
+	static SDL_GPUShader *s_alpha_blend_d_fs;
+	static SDL_GPUShader *s_const_alpha_blend_d_fs;
+	static SDL_GPUShader *s_const_color_alpha_blend_d_fs;
+	static SDL_GPUShader *s_apply_colormap_fs;
+	static SDL_GPUShader *s_apply_colormap_a_fs;
+	static SDL_GPUShader *s_apply_colormap_d_fs;
+	static SDL_GPUShader *s_ps_overlay_fs;
+	static SDL_GPUShader *s_ps_hardlight_fs;
+	static SDL_GPUShader *s_ps_softlight_fs;
+	static SDL_GPUShader *s_ps_colordodge_fs;
+	static SDL_GPUShader *s_ps_colorburn_fs;
+	static SDL_GPUShader *s_ps_diff_fs;
+	static SDL_GPUShader *s_ps_exclusion_fs;
+	static SDL_GPUShader *s_ps_lighten_fs;
+	static SDL_GPUShader *s_ps_darken_fs;
+
+	// Temp texture for dest-read
+	static SDL_GPUTexture *s_tempDest;
+	static int s_tempW, s_tempH;
+
+	// Primary render target (intermediate for layer compositing)
+	static SDL_GPUTexture *s_layerTex;
+	static int s_layerW, s_layerH;
+
+	// Command buffer currently accumulating
+	static SDL_GPUCommandBuffer *s_cmd;
+
+	static std::unordered_map<uint64_t, SDL_GPUGraphicsPipeline*> s_pipeCache;
+
+	static bool s_initialized;
+	static TVPRenderManager_GPU *s_instance;
+
 	TVPRenderManager_GPU();
 	~TVPRenderManager_GPU() override;
 
-	bool Init(SDL_Window *window);
-	void Shutdown();
+	static bool InitDevice(SDL_Window *window);
+	static void Shutdown();
+	static bool IsDeviceReady() { return s_device != nullptr; }
 	static TVPRenderManager_GPU *Instance() { return s_instance; }
-	static SDL_GPUCommandBuffer *CurrentCmd() {
-		return s_instance ? s_instance->m_cmd : nullptr;
-	}
-	bool IsReady() const { return m_device != nullptr; }
 
 	// iTVPRenderManager
 	const char *GetName() override { return "gpu"; }
 	bool IsSoftware() override { return false; }
 	bool GetRenderStat(unsigned int &drawCount, uint64_t &vmemsize) override;
+	void Initialize();
 
 	iTVPTexture2D* CreateTexture2D(const void *pixel, int pitch,
 		unsigned int w, unsigned int h, TVPTextureFormat::e format,
@@ -248,43 +154,36 @@ public:
 		const tTVPRect& rcclip, const tTVPPointD* pttar,
 		const tRenderTexQuadArray &textures) override;
 
-	void SetRenderTarget(iTVPTexture2D *target) override;
-	void BeginStencil(iTVPTexture2D* reftex) override {}
-	void EndStencil() override {}
-
-	iTVPRenderMethod* GetRenderMethod(const char *name,
-		uint32_t *hint = nullptr) override;
-
-	// Frame lifecycle — called from TVPEngineTick
+	// Frame lifecycle
 	void BeginFrame();
 	void EndFrame();
-	// End current render pass (for texture updates between draws)
-	void FlushPass();
-	// Copy current render target to a cached temp texture for dest-read operations.
-	// Closes the active render pass, does the copy, and begins a new pass on the same target.
-	// Returns the temp SDL_GPUTexture* (owned by the manager, valid until next PrepareDestReadCopy).
-	SDL_GPUTexture* PrepareDestReadCopy();
-	const uint8_t* GetFramePixels(int &w, int &h) const {
-		if (!m_hasFrameResult) return nullptr;
-		w = m_frameW; h = m_frameH;
-		return m_framePixels.data();
-	}
-	void ResetFrameResult() { m_hasFrameResult = false; }
+	void PresentFrame(const uint8_t *pixels, int w, int h);
+	const uint8_t* GetFramePixels(int &w, int &h) { w = 0; h = 0; return nullptr; }
+	void ResetFrameResult() {}
 
-	// Synchronous pixel readback for diagnostics (separate command buffer).
-	// Reads pixel at (x,y) from tex. Returns 0 on failure.
-	// Only use for debugging — SLOW (stalls GPU).
-	uint32_t ReadbackPixel(SDL_GPUTexture *tex, int x, int y);
+	// DebugLayer accessors
+	SDL_GPUDevice* GetDevice() { return s_device; }
+	static SDL_GPUCommandBuffer* CurrentCmd() { return s_cmd; }
+	SDL_GPUBuffer* GetQuadVerts() { return s_quadVerts; }
+	SDL_GPUSampler* GetSampler() { return s_sampler; }
 
-	// RenderDoc capture trigger — sets m_captureThisFrame so the next
-	// BeginFrame/EndFrame pair wraps a capture with StartFrameCapture/EndFrameCapture.
-	void TriggerRenderDocCapture();
-
-	// Accessors for DebugLayer replay
-	SDL_GPUDevice* GetDevice() const { return m_device; }
-	SDL_GPUSampler* GetSampler() const { return m_sampler; }
-	SDL_GPUBuffer* GetQuadVerts() const { return m_quadVerts; }
+	// Helpers
+	static SDL_GPUGraphicsPipeline* _GetOrCreatePipeline(
+		SDL_GPUShader *fs, const BlendConfig &blend,
+		SDL_GPUTextureFormat rtFmt, int numTextures, int numUBOs);
+	static void _DrawQuad(tTVPGPURenderMethod *method,
+		iTVPTexture2D *tar, const tTVPRect &rctar,
+		const tRenderTexRectArray &textures,
+		float fillColor[4] = nullptr,
+		float opacity = 1.0f,
+		const float *uv = nullptr);
+	static void _DrawQuadRaw(SDL_GPUGraphicsPipeline *pipe,
+		SDL_GPUTexture *tex0, SDL_GPUTexture *tex1, SDL_GPUTexture *tex2,
+		int w, int h, int numTextures, int numUBOs,
+		const float *uboData, int uboSize,
+		const float *uboData2, int uboSize2);
+	static void _EnsureDestRead(iTVPTexture2D *tar, const tTVPRect &rctar);
+	void RegisterMethods();
 };
 
-// Registration
 extern "C" void TVPRegisterGPURenderer();

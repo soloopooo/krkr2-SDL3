@@ -348,13 +348,10 @@ void TVPUpdateCursorOverlay() {
 }
 
 // Debug capture toggle — called from Java overlay button
-// Triggers a single RenderDoc capture on the next frame.
-extern void TriggerRenderDocCapture();
-
+// RenderDoc capture removed; kept as JNI stub for compat.
 extern "C" JNIEXPORT void JNICALL
 Java_org_tvp_kirikiri2_KR2Activity_nativeToggleCapture(JNIEnv*, jclass) {
-	TriggerRenderDocCapture();
-	__android_log_print(ANDROID_LOG_INFO, "##krkr", "RenderDoc capture toggled");
+	__android_log_print(ANDROID_LOG_INFO, "##krkr", "Capture toggle (no-op)");
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -390,8 +387,6 @@ extern "C" int SDL_main(int argc, char *argv[]) {
 			"SDL_CreateWindow failed: %s", SDL_GetError());
 		return 1;
 	}
-	g_window = win;
-
 	int scrW, scrH;
 	SDL_GetWindowSize(win, &scrW, &scrH);
 	TVPSetScreenSizeFromSDL(scrW, scrH);
@@ -418,21 +413,20 @@ extern "C" int SDL_main(int argc, char *argv[]) {
 	}
 
 	// Init display backend based on Java-side Intent preference.
-	// Only ONE backend is initialized to avoid Vulkan window claim conflicts.
-	// Vulkan: SDL_ClaimWindowForGPUDevice — full GPU compositing.
+	// Vulkan: InitDevice creates static resources; render manager is lazily
+	// created by TVPGetRenderManager() after TVPRetryGPU() invalidates the cache.
 	// SDL: SDL_Renderer — software compositing only.
 	bool gpuInitialized = false;
 	if (g_AndroidDisplayBackend == "vulkan" || g_AndroidDisplayBackend == "gpu") {
-		TVPRenderManager_GPU *gpuRenderer = new TVPRenderManager_GPU();
-		if (gpuRenderer->Init(win)) {
+		// InitDevice creates the singleton instance + GPU device + shaders
+		if (TVPRenderManager_GPU::InitDevice(win)) {
 			__android_log_print(ANDROID_LOG_INFO, TAG,
-				"GPU renderer (Vulkan) initialized");
+				"GPU device (Vulkan) initialized");
 			TVPRetryGPU();
 			gpuInitialized = true;
 		} else {
 			__android_log_print(ANDROID_LOG_WARN, TAG,
 				"Vulkan init failed, falling back to SDL_Renderer");
-			delete gpuRenderer;
 		}
 	}
 	if (!gpuInitialized) {
@@ -464,15 +458,14 @@ extern "C" int SDL_main(int argc, char *argv[]) {
 	LocaleConfigManager::GetInstance()->Initialize(TVPGetCurrentLanguage());
 
 	// Startup compositing — only if GPU is active (renderer config selects "gpu")
-	if (TVPRenderManager_GPU::Instance() && !TVPGetRenderManager()->IsSoftware()) {
-		TVPRenderManager_GPU::Instance()->BeginFrame();
-		// Check startup args or auto-start game
+	if (!TVPGetRenderManager()->IsSoftware() && TVPRenderManager_GPU::Instance()) {
+		auto *gpu = TVPRenderManager_GPU::Instance();
+		gpu->BeginFrame();
 		if (!TVPCheckStartupArg()) {
 			TVPShowGamePicker();
 		}
-		TVPRenderManager_GPU::Instance()->EndFrame();
+		gpu->EndFrame();
 	} else {
-		// Check startup args or auto-start game (software mode)
 		if (!TVPCheckStartupArg()) {
 			TVPShowGamePicker();
 		}

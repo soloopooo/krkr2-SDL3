@@ -390,10 +390,6 @@ void TVPDebugLayer::ServerThreadFunc() {
 			write(cfd, &cmd, 1);
 			break;
 		}
-		case 0x08: // TRIGGER_RDOC
-			TriggerRDOCapture();
-			write(cfd, &cmd, 1);
-			break;
 		case 0x09: // GET_STATUS
 		{
 			uint8_t status[32] = {};
@@ -525,27 +521,6 @@ void TVPDebugLayer::CaptureFrame() {
 
 void TVPDebugLayer::SetOutputDir(const std::string& dir) {
 	m_outDir = dir;
-}
-
-// ==========================
-// RenderDoc
-// ==========================
-
-void TVPDebugLayer::TriggerRDOCapture() {
-	m_pendingRDocCapture = true;
-}
-
-// ==========================
-// Overlay rendering (swapchain)
-// ==========================
-
-void TVPDebugLayer::RenderOverlay(SDL_GPURenderPass* rp,
-	SDL_GPUDevice* dev, SDL_GPUSampler* sampler,
-	SDL_GPUBuffer* quadVerts, int swW, int swH)
-{
-	// Deferred: in-engine overlay requires font atlas texture + dedicated text pipeline.
-	// Use JNI overlay for now (see _updateDebugOverlayJNI in WindowLayer_sdl.cpp).
-	(void)rp; (void)dev; (void)sampler; (void)quadVerts; (void)swW; (void)swH;
 }
 
 // ==========================

@@ -524,12 +524,12 @@ void TVPEngineTick() {
 		bool gpuActive = !TVPGetRenderManager()->IsSoftware();
 		if (gpuActive) {
 			auto* gpu = TVPRenderManager_GPU::Instance();
-			gpu->BeginFrame();
+			if (gpu) gpu->BeginFrame();
 			dbgLayer->OnFrameBegin();
 			// No ::Application->Run() — engine tick skipped in nav mode
 			// No compositing — replay runs instead
 			dbgLayer->OnFrameEnd();
-			gpu->EndFrame();
+			if (gpu) gpu->EndFrame();
 		} else {
 			dbgLayer->OnFrameBegin();
 			dbgLayer->OnFrameEnd();
@@ -549,7 +549,8 @@ void TVPEngineTick() {
 
 	bool gpuActive = !TVPGetRenderManager()->IsSoftware();
 	if (gpuActive) {
-		TVPRenderManager_GPU::Instance()->BeginFrame();
+		auto *gpu = TVPRenderManager_GPU::Instance();
+		if (gpu) gpu->BeginFrame();
 	}
 
 	::Application->Run();
@@ -591,18 +592,29 @@ void TVPEngineTick() {
 	if (gpuActive) {
 		TVPRenderManager_GPU *gpu = TVPRenderManager_GPU::Instance();
 		gpu->EndFrame();
-		// Readback pixels for diagnostics
+		// Readback pixels for diagnostics (nullptr in new GPU path — GPU presents directly)
 		int rw = 0, rh = 0;
-		const uint8_t *rp = gpu->GetFramePixels(rw, rh);
-		if (rp && rw > 0 && rh > 0) {
-			g_gameW = rw; g_gameH = rh;
-			if (rw != g_frameBuf.w || rh != g_frameBuf.h) {
-				g_frameBuf.w = rw; g_frameBuf.h = rh;
-				g_frameBuf.pix.resize(rw * rh, 0);
-			}
-			memcpy(g_frameBuf.pix.data(), rp, rw * rh * 4);
-		}
+		gpu->GetFramePixels(rw, rh);
 		gpu->ResetFrameResult();
+		// Update game dimensions from draw device
+		TVPWindowLayerSDL *swin = TVPWindowLayerSDL::GetActiveWindow();
+		if (swin) {
+			tTJSNI_Window *wjs = swin->GetWindow();
+			iTVPDrawDevice *dd = wjs ? wjs->GetDrawDevice() : nullptr;
+			if (dd) {
+				auto *ddc = static_cast<tTVPDrawDevice*>(dd);
+				for (size_t i = 0; ; i++) {
+					iTVPLayerManager *lm = ddc->GetLayerManagerAt(i);
+					if (!lm) break;
+					iTVPBaseBitmap *dbuf = lm->GetDrawBuffer();
+					if (dbuf && dbuf->GetWidth() > 0 && dbuf->GetHeight() > 0) {
+						rw = (int)dbuf->GetWidth();
+						rh = (int)dbuf->GetHeight();
+					}
+				}
+			}
+		}
+		if (rw > 0 && rh > 0) { g_gameW = rw; g_gameH = rh; }
 		// Dump every 30th frame
 		{
 			const uint32_t *dumpSrc = nullptr;
