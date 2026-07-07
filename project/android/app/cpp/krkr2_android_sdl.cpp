@@ -448,11 +448,12 @@ extern "C" int SDL_main(int argc, char *argv[]) {
 	// Set global flag for render manager selection
 	g_VulkanDisplayActive = gpuInitialized;
 
-	// Start debug TCP server if configured
+	// Start debug TCP server if configured (requires both debug_layer=1 and a valid port)
 	{
-		int debugPort = GlobalConfigManager::GetInstance()
-			->GetValue<int>("debug_tcp_port", 0);
-		if (debugPort > 0) {
+		auto *cfg = GlobalConfigManager::GetInstance();
+		int debugLayer = cfg->GetValue<int>("debug_layer", 0);
+		int debugPort = cfg->GetValue<int>("debug_tcp_port", 0);
+		if (debugLayer && debugPort > 0) {
 			TVPDebugLayer::Instance()->StartServer(debugPort);
 			__android_log_print(ANDROID_LOG_INFO, TAG,
 				"Debug TCP server started on port %d", debugPort);
